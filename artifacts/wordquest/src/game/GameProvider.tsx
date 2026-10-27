@@ -7,14 +7,14 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { audioService } from '@/src/services/audio';
 import { adProvider } from '@/src/services/ads';
 import { BONUS_WORDS } from '@/src/data/bonusWords';
 import { CATEGORIES, getCategory } from '@/src/data/categories';
-import { consumeHint, generatePuzzle, getTimeBonus, isTimeExpired, matchPuzzleWord, scoreSelection, selectionWord, validateBonusWord } from '@/src/engine/gameEngine';
+import { elapsedMilliseconds, monotonicNow } from '@/src/engine/gameClock';
+import { consumeHint, generatePuzzle, getTimeBonus, isTimeExpired, resolveWordSelection, scoreSelection, selectionWord } from '@/src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS } from '@/src/engine/progression';
 import { loadProgress, saveProgress } from '@/src/services/persistence';
 import type { CategoryId, GameMode, GameSummary, Placement, Position, Puzzle, SavedProgress } from '@/src/types/game';
@@ -142,8 +142,10 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     completionHandled.current = true;
     const category = getCategory(current.categoryId);
     if (!category) return;
-    const elapsedMs = current.elapsedMs + (
-      current.runningSince === null ? 0 : Math.max(0, Date.now() - current.runningSince)
+    const elapsedMs = elapsedMilliseconds(
+      current.elapsedMs,
+      current.runningSince,
+      monotonicNow(),
     );
     const elapsedSeconds = Math.floor(elapsedMs / 1000);
     const settled = { ...current, elapsedMs, elapsedSeconds, runningSince: null };
@@ -181,18 +183,38 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const recordSelection = useCallback((cells: Position[]) => {
     const current = latestGame.current;
     if (!current || current.ended) return 'invalid' as const;
+    const elapsedMs = elapsedMilliseconds(
+      current.elapsedMs,
+      current.runningSince,
+      monotonicNow(),
+    );
+    const elapsedSeconds = Math.floor(elapsedMs / 1000);
+    if (isTimeExpired(current.mode, elapsedSeconds)) {
+      finishGame({
+        ...current,
+        elapsedMs,
+        elapsedSeconds,
+        runningSince: null,
+      }, false);
+      return 'invalid' as const;
+    }
     const raw = selectionWord(current.puzzle.grid, cells);
     if (!raw) {
       void audioService.play('wrong');
       return 'invalid' as const;
     }
-    const unfound = current.puzzle.words.filter((word) => !current.foundWords.includes(word));
-    const puzzleWord = matchPuzzleWord(raw, unfound);
-    if (puzzleWord) {
+    const resolution = resolveWordSelection(
+      raw,
+      current.puzzle.words,
+      current.foundWords,
+      current.bonusWords,
+      BONUS_WORDS,
+    );
+    if (resolution.kind === 'puzzle') {
       const next: ActiveGame = {
         ...current,
         score: current.score + scoreSelection('puzzle'),
-        foundWords: [...current.foundWords, puzzleWord],
+        foundWords: [...current.foundWords, resolution.word],
       };
       latestGame.current = next;
       setGame(next);
@@ -201,29 +223,18 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       if (next.foundWords.length === next.puzzle.words.length) finishGame(next, true);
       return 'puzzle' as const;
     }
-    const normalizedBonus = validateBonusWord(raw, current.puzzle.words, current.bonusWords, BONUS_WORDS);
-    if (normalizedBonus) {
+    if (resolution.kind === 'bonus') {
       const next = {
         ...current,
         score: current.score + scoreSelection('bonus'),
-        bonusWords: [...current.bonusWords, normalizedBonus],
+        bonusWords: [...current.bonusWords, resolution.word],
       };
       latestGame.current = next;
       setGame(next);
       void audioService.play('bonus');
       return 'bonus' as const;
     }
-    const candidate = BONUS_WORDS.has(raw.toUpperCase())
-      ? raw.toUpperCase()
-      : [...raw.toUpperCase()].reverse().join('');
-    if (BONUS_WORDS.has(candidate) && current.bonusWords.includes(candidate)) {
-      return 'duplicate' as const;
-    }
-    if (current.puzzle.words.some((word) =>
-      word === raw.toUpperCase() || [...word].reverse().join('') === raw.toUpperCase(),
-    )) {
-      return 'duplicate' as const;
-    }
+    if (resolution.kind === 'duplicate') return 'duplicate' as const;
     void audioService.play('wrong');
     return 'invalid' as const;
   }, [finishGame]);
@@ -267,7 +278,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const resumeClock = useCallback(() => {
     const current = latestGame.current;
     if (!current || current.ended || current.runningSince !== null) return;
-    const next = { ...current, runningSince: Date.now() };
+    const next = { ...current, runningSince: monotonicNow() };
     latestGame.current = next;
     setGame(next);
   }, []);
@@ -275,8 +286,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const pauseClock = useCallback(() => {
     const current = latestGame.current;
     if (!current || current.runningSince === null || current.ended) return;
-    const now = Date.now();
-    const elapsedMs = current.elapsedMs + Math.max(0, now - current.runningSince);
+    const elapsedMs = elapsedMilliseconds(
+      current.elapsedMs,
+      current.runningSince,
+      monotonicNow(),
+    );
     const next = { ...current, elapsedMs, elapsedSeconds: Math.floor(elapsedMs / 1000), runningSince: null };
     latestGame.current = next;
     setGame(next);
@@ -285,7 +299,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const syncClock = useCallback(() => {
     const current = latestGame.current;
     if (!current || current.ended || current.runningSince === null) return;
-    const elapsedMs = current.elapsedMs + Math.max(0, Date.now() - current.runningSince);
+    const elapsedMs = elapsedMilliseconds(
+      current.elapsedMs,
+      current.runningSince,
+      monotonicNow(),
+    );
     const elapsedSeconds = Math.floor(elapsedMs / 1000);
     if (elapsedSeconds === current.elapsedSeconds) return;
     const next = { ...current, elapsedSeconds };
@@ -300,14 +318,6 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       }
     }
   }, [finishGame]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active') resumeClock();
-      else pauseClock();
-    });
-    return () => subscription.remove();
-  }, [pauseClock, resumeClock]);
 
   const toggleSound = useCallback(() => {
     setProgress((current) => ({ ...current, soundEnabled: !current.soundEnabled }));

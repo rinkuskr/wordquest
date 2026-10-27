@@ -176,8 +176,10 @@ export function matchPuzzleWord(
   ) ?? null;
 }
 
-export function scoreSelection(kind: 'puzzle' | 'bonus'): number {
-  return kind === 'puzzle' ? 10 : 5;
+export function scoreSelection(kind: 'puzzle' | 'bonus' | 'duplicate' | 'invalid'): number {
+  if (kind === 'puzzle') return 10;
+  if (kind === 'bonus') return 5;
+  return 0;
 }
 
 export function validateBonusWord(
@@ -198,6 +200,37 @@ export function validateBonusWord(
     return null;
   }
   return candidate;
+}
+
+export type SelectionResolution =
+  | { kind: 'puzzle'; word: string }
+  | { kind: 'bonus'; word: string }
+  | { kind: 'duplicate' }
+  | { kind: 'invalid' };
+
+export function resolveWordSelection(
+  value: string,
+  puzzleWords: readonly string[],
+  foundWords: readonly string[],
+  bonusWords: readonly string[],
+  dictionary: ReadonlySet<string>,
+): SelectionResolution {
+  const unfoundWords = puzzleWords.filter((word) => !foundWords.includes(word));
+  const puzzleWord = matchPuzzleWord(value, unfoundWords);
+  if (puzzleWord) return { kind: 'puzzle', word: puzzleWord };
+
+  const bonusWord = validateBonusWord(value, puzzleWords, bonusWords, dictionary);
+  if (bonusWord) return { kind: 'bonus', word: bonusWord };
+
+  const forward = value.toUpperCase();
+  const backward = [...forward].reverse().join('');
+  const isFoundPuzzleWord = puzzleWords.some(
+    (word) => foundWords.includes(word) && (word === forward || word === backward),
+  );
+  const isFoundBonusWord = bonusWords.includes(forward) || bonusWords.includes(backward);
+  return isFoundPuzzleWord || isFoundBonusWord
+    ? { kind: 'duplicate' }
+    : { kind: 'invalid' };
 }
 
 export function consumeHint(hintsLeft: number, hasAvailableWords: boolean) {

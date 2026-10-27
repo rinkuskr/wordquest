@@ -12,10 +12,10 @@ import type { GameMode } from '@/src/types/game';
 export default function ModeSelectScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { selectedCategoryId, startGame, error } = useGame();
+  const { selectedCategoryId, startGame, error, ready } = useGame();
   const category = getCategory(selectedCategoryId);
   const [mode, setMode] = useState<GameMode>('classic');
-  const canPlay = !!category?.words.length;
+  const canPlay = ready && !!category?.words.length;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>

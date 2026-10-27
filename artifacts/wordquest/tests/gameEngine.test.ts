@@ -9,12 +9,14 @@ import {
   getTimeBonus,
   isTimeExpired,
   matchPuzzleWord,
+  resolveWordSelection,
   scoreSelection,
   seededRandom,
   selectionWord,
   validateBonusWord,
 } from '../src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS, normalizeProgress } from '../src/engine/progression';
+import { elapsedMilliseconds, shouldRunGameClock } from '../src/engine/gameClock';
 import { MockAdProvider } from '../src/services/ads';
 import { HIGHLIGHT_COLORS } from '../src/theme/highlights';
 import type { Position } from '../src/types/game';
@@ -86,6 +88,27 @@ describe('selection, bonus words, and scoring', () => {
     expect(selectionWord(grid, [{ row: 0, col: 0 }, { row: 1, col: 1 }, { row: 2, col: 1 }])).toBeNull();
   });
 
+  it('accepts forward and reverse selections in every straight-line direction', () => {
+    const directions = [
+      [-1, -1], [-1, 0], [-1, 1], [0, -1],
+      [0, 1], [1, -1], [1, 0], [1, 1],
+    ];
+    directions.forEach(([dr, dc]) => {
+      const start = { row: dr < 0 ? 3 : 0, col: dc < 0 ? 3 : 0 };
+      const cells = Array.from({ length: 3 }, (_, index) => ({
+        row: start.row + dr * index,
+        col: start.col + dc * index,
+      }));
+      const selectionGrid = Array.from({ length: 4 }, () => Array<string>(4).fill('X'));
+      ['C', 'A', 'T'].forEach((letter, index) => {
+        selectionGrid[cells[index].row][cells[index].col] = letter;
+      });
+      expect(selectionWord(selectionGrid, cells)).toBe('CAT');
+      expect(selectionWord(selectionGrid, [...cells].reverse())).toBe('TAC');
+      expect(matchPuzzleWord(selectionWord(selectionGrid, [...cells].reverse()) ?? '', ['CAT'])).toBe('CAT');
+    });
+  });
+
   it('contains at least 600 curated words and rejects puzzle and duplicate words', () => {
     expect(BONUS_WORD_COUNT).toBeGreaterThanOrEqual(600);
     expect(BONUS_WORDS.has('CAT')).toBe(true);
@@ -101,6 +124,29 @@ describe('selection, bonus words, and scoring', () => {
     const alreadyFound = ['CAT'];
     expect(matchPuzzleWord('TAC', ['DOG'])).toBeNull();
     expect(alreadyFound).toContain('CAT');
+  });
+
+  it('classifies invalid and repeated words without granting scoreable matches', () => {
+    const dictionary = new Set(['CAT', 'DOG', 'BIRD']);
+    expect(resolveWordSelection('CAT', ['CAT'], [], [], dictionary)).toEqual({
+      kind: 'puzzle',
+      word: 'CAT',
+    });
+    expect(resolveWordSelection('TAC', ['CAT'], ['CAT'], [], dictionary)).toEqual({
+      kind: 'duplicate',
+    });
+    expect(resolveWordSelection('DOG', ['CAT'], [], [], dictionary)).toEqual({
+      kind: 'bonus',
+      word: 'DOG',
+    });
+    expect(resolveWordSelection('GOD', ['CAT'], [], ['DOG'], dictionary)).toEqual({
+      kind: 'duplicate',
+    });
+    expect(resolveWordSelection('ZZZ', ['CAT'], [], [], dictionary)).toEqual({
+      kind: 'invalid',
+    });
+    expect(scoreSelection('invalid')).toBe(0);
+    expect(scoreSelection('duplicate')).toBe(0);
   });
 
   it('awards time bonuses only for time mode', () => {
@@ -193,6 +239,25 @@ describe('hints, progression, and local data recovery', () => {
     );
     expect(names).toHaveLength(8);
     expect(totalBytes).toBeLessThan(500 * 1024);
+  });
+});
+
+describe('game clock lifecycle', () => {
+  it('runs only while the game screen is focused and the app is foregrounded', () => {
+    expect(shouldRunGameClock(true, true, true)).toBe(true);
+    expect(shouldRunGameClock(true, false, true)).toBe(false);
+    expect(shouldRunGameClock(true, true, false)).toBe(false);
+    expect(shouldRunGameClock(false, true, true)).toBe(false);
+  });
+
+  it('accumulates active time without counting a paused background interval', () => {
+    const beforePause = elapsedMilliseconds(0, 1_000, 11_000);
+    expect(beforePause).toBe(10_000);
+    const whilePaused = elapsedMilliseconds(beforePause, null, 80_000);
+    expect(whilePaused).toBe(10_000);
+    const afterResume = elapsedMilliseconds(whilePaused, 80_000, 83_000);
+    expect(afterResume).toBe(13_000);
+    expect(elapsedMilliseconds(13_000, 84_000, 83_000)).toBe(13_000);
   });
 });
 
