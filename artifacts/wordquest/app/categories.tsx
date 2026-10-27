@@ -5,7 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { CoinPill, PageHeader } from '@/src/components/ui';
-import { CATEGORIES, hasCompleteCategoryData, isCategoryUnlocked } from '@/src/data/categories';
+import { CATEGORIES, isCategoryUnlocked } from '@/src/data/categories';
 import { useGame } from '@/src/game/GameProvider';
 import { audioService } from '@/src/services/audio';
 
@@ -73,14 +73,6 @@ export default function CategoriesScreen() {
           );
         }}
       />
-      {!hasCompleteCategoryData && (
-        <View style={[styles.pendingNote, { backgroundColor: '#fff7e8', borderColor: '#ffe7b5' }]}>
-          <Feather name="info" size={15} color={colors.orange} />
-          <Text style={[styles.pendingText, { color: '#77501f' }]}>
-            Exact puzzle word lists are being added before play is enabled.
-          </Text>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -100,6 +92,4 @@ const styles = StyleSheet.create({
   statusIcon: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   name: { marginTop: 14, fontSize: 15, fontWeight: '800' },
   status: { marginTop: 5, fontSize: 8, fontWeight: '800', letterSpacing: 0.65 },
-  pendingNote: { flexDirection: 'row', gap: 9, alignItems: 'center', borderWidth: 1, borderRadius: 15, padding: 12, marginBottom: 8 },
-  pendingText: { flex: 1, fontSize: 11, lineHeight: 16, fontWeight: '600' },
 });

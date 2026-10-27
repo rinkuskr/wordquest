@@ -67,14 +67,6 @@ export default function ModeSelectScreen() {
           </View>
         </View>
 
-        {!canPlay && (
-          <View style={[styles.unavailable, { backgroundColor: '#fff7e8', borderColor: '#ffe7b5' }]}>
-            <Feather name="clock" size={17} color={colors.orange} />
-            <Text style={[styles.unavailableText, { color: '#77501f' }]}>
-              Play will unlock when the exact {category?.name ?? ''} word list is added.
-            </Text>
-          </View>
-        )}
         {!!error && <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text>}
         <PrimaryButton
           title="Start puzzle"
@@ -146,8 +138,6 @@ const styles = StyleSheet.create({
   rules: { borderWidth: 1, borderRadius: 19, padding: 15, gap: 13, marginTop: 7, marginBottom: 18 },
   ruleRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   ruleText: { fontSize: 12, fontWeight: '600' },
-  unavailable: { flexDirection: 'row', gap: 10, alignItems: 'center', borderWidth: 1, borderRadius: 15, padding: 12, marginBottom: 13 },
-  unavailableText: { flex: 1, fontSize: 11, lineHeight: 16, fontWeight: '600' },
   error: { fontSize: 12, marginBottom: 10 },
   startButton: { marginTop: 0 },
 });

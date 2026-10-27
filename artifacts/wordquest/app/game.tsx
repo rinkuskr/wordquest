@@ -47,9 +47,9 @@ export default function GameScreen() {
           <View style={[styles.emptyIcon, { backgroundColor: '#fff0dc' }]}>
             <Feather name="clock" size={27} color={colors.orange} />
           </View>
-          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>The puzzle is not ready yet</Text>
+          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No active puzzle</Text>
           <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-            Add the exact category word list to start a real puzzle.
+            Choose a category and start a new puzzle to play.
           </Text>
         </View>
       </SafeAreaView>

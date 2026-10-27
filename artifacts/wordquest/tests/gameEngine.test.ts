@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, statSync } from 'node:fs';
 import { BONUS_WORD_COUNT, BONUS_WORDS } from '../src/data/bonusWords';
-import { CATEGORIES, isCategoryUnlocked } from '../src/data/categories';
+import { CATEGORIES, hasCompleteCategoryData, isCategoryUnlocked } from '../src/data/categories';
 import {
   consumeHint,
   generatePuzzle,
@@ -161,6 +161,22 @@ describe('hints, progression, and local data recovery', () => {
       'ocean-life', 'music', 'movies', 'nature', 'technology', 'jobs',
       'clothing', 'vegetables',
     ]);
+  });
+
+  it('ships playable, normalized word lists and generates every category board', () => {
+    expect(CATEGORIES).toHaveLength(15);
+    expect(hasCompleteCategoryData).toBe(true);
+    CATEGORIES.forEach((category, index) => {
+      expect(category.words.length, `${category.name} should have puzzle words`).toBeGreaterThan(0);
+      expect(new Set(category.words).size, `${category.name} should not repeat words`).toBe(category.words.length);
+      expect(category.words.every((word) => /^[A-Z]+$/.test(word)), `${category.name} words should be uppercase A–Z`).toBe(true);
+
+      const puzzle = generatePuzzle(category.words, seededRandom(index + 1));
+      expect(puzzle.words).toEqual(category.words);
+      expect(puzzle.placements.map((placement) => placement.word).sort()).toEqual([...category.words].sort());
+      expect(puzzle.grid).toHaveLength(puzzle.size);
+      expect(puzzle.grid.every((row) => row.length === puzzle.size)).toBe(true);
+    });
   });
 
   it('defines all 18 distinct found-word highlight families', () => {

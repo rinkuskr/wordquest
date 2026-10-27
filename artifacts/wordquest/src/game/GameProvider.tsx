@@ -106,7 +106,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const startGame = useCallback((mode: GameMode) => {
     const category = getCategory(selectedCategoryId);
     if (!category || category.words.length === 0) {
-      setError('This puzzle is waiting for its exact category word list.');
+      setError('This category does not have any puzzle words configured.');
       return false;
     }
     try {

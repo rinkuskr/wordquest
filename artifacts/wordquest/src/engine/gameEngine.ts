@@ -11,6 +11,8 @@ const DIRECTIONS: readonly Position[] = [
   { row: 1, col: 1 },
 ];
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const MAX_PLACEMENT_ATTEMPTS = 500;
+const MAX_LAYOUT_ATTEMPTS = 25;
 
 export function getGridSize(words: readonly string[]): 8 | 10 | 12 {
   const normalized = words.map((word) => word.trim().toUpperCase());
@@ -45,50 +47,64 @@ export function generatePuzzle(
   }
 
   const size = getGridSize(words);
-  const grid = Array.from({ length: size }, () => Array<string>(size).fill(''));
-  const placements: Placement[] = [];
   const orderedWords = [...words].sort((a, b) => b.length - a.length);
+  if (orderedWords.some((word) => word.length > size)) {
+    const word = orderedWords.find((candidate) => candidate.length > size)!;
+    throw new Error(`"${word}" is longer than the ${size}×${size} puzzle grid.`);
+  }
 
-  for (const word of orderedWords) {
-    if (word.length > size) {
-      throw new Error(`"${word}" is longer than the ${size}×${size} puzzle grid.`);
-    }
-    let placed: Placement | null = null;
-    for (let attempt = 0; attempt < 500 && !placed; attempt += 1) {
-      const direction = DIRECTIONS[Math.floor(random() * DIRECTIONS.length)];
-      const row = Math.floor(random() * size);
-      const col = Math.floor(random() * size);
-      const cells = Array.from({ length: word.length }, (_, index) => ({
-        row: row + direction.row * index,
-        col: col + direction.col * index,
-      }));
-      if (
-        cells.some(
-          ({ row: r, col: c }) =>
-            r < 0 || c < 0 || r >= size || c >= size,
-        )
-      ) {
-        continue;
-      }
-      if (
-        cells.some(({ row: r, col: c }, index) => {
-          const existing = grid[r][c];
+  let grid: string[][] | null = null;
+  let placements: Placement[] | null = null;
+  let lastFailedWord = orderedWords[0];
+  for (let layoutAttempt = 0; layoutAttempt < MAX_LAYOUT_ATTEMPTS; layoutAttempt += 1) {
+    const candidateGrid = Array.from({ length: size }, () => Array<string>(size).fill(''));
+    const candidatePlacements: Placement[] = [];
+    let failed = false;
+
+    for (const word of orderedWords) {
+      let placed: Placement | null = null;
+      for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS && !placed; attempt += 1) {
+        const direction = DIRECTIONS[Math.floor(random() * DIRECTIONS.length)];
+        const row = Math.floor(random() * size);
+        const col = Math.floor(random() * size);
+        const cells = Array.from({ length: word.length }, (_, index) => ({
+          row: row + direction.row * index,
+          col: col + direction.col * index,
+        }));
+        if (cells.some(({ row: r, col: c }) => r < 0 || c < 0 || r >= size || c >= size)) {
+          continue;
+        }
+        if (cells.some(({ row: r, col: c }, index) => {
+          const existing = candidateGrid[r][c];
           return existing !== '' && existing !== word[index];
-        })
-      ) {
-        continue;
+        })) {
+          continue;
+        }
+        cells.forEach(({ row: r, col: c }, index) => {
+          candidateGrid[r][c] = word[index];
+        });
+        placed = { word, cells };
       }
-      cells.forEach(({ row: r, col: c }, index) => {
-        grid[r][c] = word[index];
-      });
-      placed = { word, cells };
+
+      if (!placed) {
+        lastFailedWord = word;
+        failed = true;
+        break;
+      }
+      candidatePlacements.push(placed);
     }
-    if (!placed) {
-      throw new Error(
-        `Could not place "${word}" after 500 attempts. Try a larger or less crowded word list.`,
-      );
+
+    if (!failed) {
+      grid = candidateGrid;
+      placements = candidatePlacements;
+      break;
     }
-    placements.push(placed);
+  }
+
+  if (!grid || !placements) {
+    throw new Error(
+      `Could not place "${lastFailedWord}" after ${MAX_LAYOUT_ATTEMPTS} complete layout attempts.`,
+    );
   }
 
   for (let row = 0; row < size; row += 1) {
