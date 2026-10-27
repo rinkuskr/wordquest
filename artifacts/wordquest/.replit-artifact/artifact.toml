@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/wordquest/"
+title = "WordQuest"
+description = "A native offline word-search puzzle game for Android, with category progression, classic and timed play, gesture-based selection, hints, scoring, and locally saved progress."
+version = "1.0.0"
+id = "artifacts/wordquest"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/wordquest/" ]
+localPort = 21680
+
+[services.development]
+run = "pnpm --filter @workspace/wordquest run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/wordquest", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/wordquest", "run", "serve" ]
+
+[services.env]
+PORT = "21680"
+BASE_PATH = "/wordquest/"
