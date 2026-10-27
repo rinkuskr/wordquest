@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -19,7 +19,7 @@ export default function ModeSelectScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-      <PageHeader title="Pick your pace" subtitle={category?.name ?? 'Choose a game mode'} onBack={() => router.back()} right={<IconButton icon="help-circle" accessibilityLabel="How to play" onPress={() => undefined} />} />
+      <PageHeader title="Pick your pace" subtitle={category?.name ?? 'Choose a game mode'} onBack={() => router.back()} right={<IconButton icon="help-circle" accessibilityLabel="How to play" onPress={() => Alert.alert('How to play', 'Choose a mode, then drag across adjacent letters in a straight horizontal, vertical, or diagonal line. Find every listed word to complete the puzzle.')} />} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={[styles.categoryBanner, { backgroundColor: colors.navy }]}>
           <Text style={styles.categoryEmoji}>{category?.emoji ?? '🔎'}</Text>

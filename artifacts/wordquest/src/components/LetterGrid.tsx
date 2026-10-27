@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useColors } from '@/hooks/useColors';
 import { withOpacity, HIGHLIGHT_COLORS } from '@/src/theme/highlights';
 import { audioService } from '@/src/services/audio';
+import { pointToGridCell, straightLineBetween } from '@/src/engine/gridTouch';
 import type { Placement, Position, Puzzle } from '@/src/types/game';
 
 interface LetterGridProps {
@@ -18,28 +19,11 @@ function samePosition(a: Position, b: Position) {
   return a.row === b.row && a.col === b.col;
 }
 
-function lineBetween(start: Position, end: Position): Position[] {
-  const rowDelta = end.row - start.row;
-  const colDelta = end.col - start.col;
-  const length = Math.max(Math.abs(rowDelta), Math.abs(colDelta));
-  if (
-    length === 0 ||
-    !(rowDelta === 0 || colDelta === 0 || Math.abs(rowDelta) === Math.abs(colDelta))
-  ) {
-    return [];
-  }
-  const rowStep = Math.sign(rowDelta);
-  const colStep = Math.sign(colDelta);
-  return Array.from({ length: length + 1 }, (_, index) => ({
-    row: start.row + rowStep * index,
-    col: start.col + colStep * index,
-  }));
-}
-
 export default function LetterGrid({ puzzle, foundWords, hintCells, onSelection }: LetterGridProps) {
   const colors = useColors();
   const [boardWidth, setBoardWidth] = useState(0);
   const [selectedCells, setSelectedCells] = useState<Position[]>([]);
+  const selectedCellsRef = useRef<Position[]>([]);
   const pulse = useMemo(() => new Animated.Value(0.2), []);
   const isHinted = useCallback(
     (row: number, col: number) => hintCells.some((cell) => cell.row === row && cell.col === col),
@@ -76,32 +60,43 @@ export default function LetterGrid({ puzzle, foundWords, hintCells, onSelection 
 
   const pointToCell = useCallback((x: number, y: number): Position | null => {
     if (!boardWidth) return null;
-    const cellWidth = boardWidth / puzzle.size;
-    const col = Math.max(0, Math.min(puzzle.size - 1, Math.floor(x / cellWidth)));
-    const row = Math.max(0, Math.min(puzzle.size - 1, Math.floor(y / cellWidth)));
-    return { row, col };
+    return pointToGridCell(x, y, boardWidth, puzzle.size);
   }, [boardWidth, puzzle.size]);
 
   const startSelection = useCallback((x: number, y: number) => {
     const cell = pointToCell(x, y);
-    setSelectedCells(cell ? [cell] : []);
+    const next = cell ? [cell] : [];
+    selectedCellsRef.current = next;
+    setSelectedCells(next);
     if (cell) void audioService.play('swipe');
   }, [pointToCell]);
 
   const updateSelection = useCallback((x: number, y: number) => {
     const target = pointToCell(x, y);
     if (!target) return;
-    setSelectedCells((previous) => {
-      if (!previous.length) return [target];
-      const next = lineBetween(previous[0], target);
-      return next.length ? next : previous;
-    });
+    const previous = selectedCellsRef.current;
+    if (!previous.length) {
+      selectedCellsRef.current = [target];
+      setSelectedCells([target]);
+      return;
+    }
+    const next = straightLineBetween(previous[0], target);
+    if (!next.length) return;
+    selectedCellsRef.current = next;
+    setSelectedCells(next);
   }, [pointToCell]);
 
   const finishSelection = useCallback(() => {
-    if (selectedCells.length > 1) onSelection(selectedCells);
+    const selection = selectedCellsRef.current;
+    if (selection.length > 1) onSelection(selection);
+    selectedCellsRef.current = [];
     setSelectedCells([]);
-  }, [onSelection, selectedCells]);
+  }, [onSelection]);
+
+  const clearSelection = useCallback(() => {
+    selectedCellsRef.current = [];
+    setSelectedCells([]);
+  }, []);
 
   const gesture = useMemo(
     () =>
@@ -110,8 +105,8 @@ export default function LetterGrid({ puzzle, foundWords, hintCells, onSelection 
         .onBegin((event) => runOnJS(startSelection)(event.x, event.y))
         .onUpdate((event) => runOnJS(updateSelection)(event.x, event.y))
         .onEnd(() => runOnJS(finishSelection)())
-        .onFinalize(() => runOnJS(setSelectedCells)([])),
-    [finishSelection, startSelection, updateSelection],
+        .onFinalize(() => runOnJS(clearSelection)()),
+    [clearSelection, finishSelection, startSelection, updateSelection],
   );
 
   const selected = (row: number, col: number) =>

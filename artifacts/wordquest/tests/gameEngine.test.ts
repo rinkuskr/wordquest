@@ -17,6 +17,7 @@ import {
 } from '../src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS, normalizeProgress } from '../src/engine/progression';
 import { elapsedMilliseconds, shouldRunGameClock } from '../src/engine/gameClock';
+import { pointToGridCell, straightLineBetween } from '../src/engine/gridTouch';
 import { MockAdProvider } from '../src/services/ads';
 import { HIGHLIGHT_COLORS } from '../src/theme/highlights';
 import type { Position } from '../src/types/game';
@@ -258,6 +259,23 @@ describe('game clock lifecycle', () => {
     const afterResume = elapsedMilliseconds(whilePaused, 80_000, 83_000);
     expect(afterResume).toBe(13_000);
     expect(elapsedMilliseconds(13_000, 84_000, 83_000)).toBe(13_000);
+  });
+});
+
+describe('native grid touch geometry', () => {
+  it('maps touch points through the grid inset and clamps edge touches', () => {
+    expect(pointToGridCell(5, 5, 300, 10)).toEqual({ row: 0, col: 0 });
+    expect(pointToGridCell(295, 295, 300, 10)).toEqual({ row: 9, col: 9 });
+    expect(pointToGridCell(-10, 310, 300, 10)).toEqual({ row: 9, col: 0 });
+    expect(pointToGridCell(10, 10, 10, 10)).toBeNull();
+  });
+
+  it('keeps touch selections straight and supports every line direction', () => {
+    expect(straightLineBetween({ row: 1, col: 1 }, { row: 4, col: 4 })).toEqual([
+      { row: 1, col: 1 }, { row: 2, col: 2 }, { row: 3, col: 3 }, { row: 4, col: 4 },
+    ]);
+    expect(straightLineBetween({ row: 4, col: 1 }, { row: 1, col: 4 })).toHaveLength(4);
+    expect(straightLineBetween({ row: 1, col: 1 }, { row: 3, col: 2 })).toEqual([]);
   });
 });
 

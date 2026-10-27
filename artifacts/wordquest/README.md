@@ -37,9 +37,22 @@ See `docs/ads-setup.md` before enabling ads.
 
 The Android package ID is `com.wordquest.puzzle`, version `1.0.0`, version code
 `1`. The Expo preview and app source are configured, but this project has not
-produced or signed a release APK/AAB. Test on a device through the workspace's
-Expo phone preview. A release build requires an Android native build toolchain
-and signing configuration.
+produced an APK/AAB. Replit's supported on-device development path is Expo Go:
+
+1. Install **Expo Go** from Google Play on the Android phone.
+2. Open the WordQuest preview in Replit and use **Open in Expo Go** from the
+   Preview panel to show its QR code.
+3. Scan that QR code with the phone while both devices have network access.
+4. Test category selection, dragging, game completion, and saved progress. After
+   completing a category, fully close and reopen WordQuest to check that the
+   coin balance and unlock remain.
+
+This loads the app in Expo Go, not as a standalone APK. The workspace has no
+Android SDK, Gradle wrapper, or native Android project, and Replit's Expo mobile
+workflow does not provide a supported Android APK build step. No signed
+production build has been created. Gesture Handler is included in the native
+Expo Go runtime, but touch behavior still needs confirmation on a physical
+Android phone.
 
 ## Service
 
