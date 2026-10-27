@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { GameProvider } from '@/src/game/GameProvider';
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -21,8 +21,12 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (
-    <Stack screenOptions={{ headerBackTitle: 'Back' }}>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+    <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="categories" />
+      <Stack.Screen name="modes" />
+      <Stack.Screen name="game" />
+      <Stack.Screen name="results" />
     </Stack>
   );
 }
@@ -48,9 +52,9 @@ export default function RootLayout() {
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
-            <KeyboardProvider>
+            <GameProvider>
               <RootLayoutNav />
-            </KeyboardProvider>
+            </GameProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>
       </ErrorBoundary>

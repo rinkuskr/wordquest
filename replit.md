@@ -1,6 +1,6 @@
-# [Project name]
+# WordQuest
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An offline-first native word-search game for Android, with progressive categories, classic and timed play, hints, and local saves.
 
 ## Run & Operate
 
@@ -14,7 +14,8 @@ _Replace the heading above with the project's name, and this line with one sente
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
+- Mobile: Expo Router, React Native, TypeScript, AsyncStorage
+- API: shared Express 5 service; health-only and optional to gameplay
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
@@ -22,15 +23,23 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/wordquest/app/` — Home, category, mode, game, and results routes
+- `artifacts/wordquest/src/engine/` — puzzle, selection, scoring, and progression rules
+- `artifacts/wordquest/src/data/categories.ts` — stable category IDs/order and category word arrays
+- `artifacts/wordquest/src/services/` — local save, audio, and ad abstractions
+- `artifacts/api-server/` — shared health API, including `GET /health`
+- `lib/api-spec/openapi.yaml` — API contract source of truth
+- `artifacts/wordquest/tests/` — deterministic game-logic tests
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Category word arrays must match the user's exact supplied lists; do not invent or substitute words.
+- Gameplay must remain offline and must not depend on the health endpoint.
+- AdMob stays disabled until real IDs and a compatible native ads build are configured.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Android word-search game with 15 progressive categories, classic/time modes, gesture selection, hints, scoring, local progression, and results.
 
 ## User preferences
 
