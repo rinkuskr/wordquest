@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
@@ -11,13 +11,17 @@ import { useGame } from '@/src/game/GameProvider';
 import { audioService } from '@/src/services/audio';
 import { adProvider } from '@/src/services/ads';
 import { useGameClock } from '@/src/hooks/useGameClock';
+import { getGameBoardSize } from '@/src/engine/gameLayout';
 
 export default function GameScreen() {
   const colors = useColors();
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { game, hintCells, showHint, requestRewardedHint, recordSelection, resumeClock, pauseClock, syncClock } = useGame();
   const [notice, setNotice] = useState<string | null>(null);
   const category = game ? getCategory(game.categoryId) : undefined;
+  const boardSize = getGameBoardSize(width, height - insets.top - insets.bottom);
 
   useGameClock({
     active: !!game && !game.ended,
@@ -94,75 +98,78 @@ export default function GameScreen() {
         <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${game.puzzle.words.length ? (game.foundWords.length / game.puzzle.words.length) * 100 : 0}%` }]} />
       </View>
 
-      <View style={styles.gridWrap}>
-        <LetterGrid
-          puzzle={game.puzzle}
-          foundWords={game.foundWords}
-          hintCells={hintCells}
-          onSelection={onSelection}
-        />
-        {!!notice && (
-          <View style={[styles.notice, { backgroundColor: colors.navy }]}>
-            <Text style={styles.noticeText}>{notice}</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.wordHeading}>
-        <Text style={[styles.wordLabel, { color: colors.mutedForeground }]}>FIND THESE WORDS</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Use a hint"
-          disabled={game.hintsLeft <= 0}
-          testID="hint-button"
-          onPress={() => {
-            const used = showHint();
-            setNotice(used ? 'Follow the yellow highlight' : 'No hints remaining');
-            if (used) void audioService.play('tap');
-          }}
-          style={({ pressed }) => [
-            styles.hintButton,
-            { backgroundColor: '#fff2ca', opacity: game.hintsLeft <= 0 ? 0.45 : pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Feather name="sun" size={15} color="#a76c05" />
-          <Text style={styles.hintText}>Hint</Text>
-          <View style={styles.hintBadge}><Text style={styles.hintCount}>{game.hintsLeft}</Text></View>
-        </Pressable>
-      </View>
-      {game.hintsLeft === 0 && adProvider.state === 'ready' && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={async () => {
-            const granted = await requestRewardedHint();
-            setNotice(granted ? 'Extra hint added' : 'The ad was not completed');
-          }}
-          style={({ pressed }) => [styles.rewardedButton, { opacity: pressed ? 0.7 : 1 }]}
-        >
-          <Feather name="play-circle" size={14} color={colors.primary} />
-          <Text style={[styles.rewardedText, { color: colors.primary }]}>Watch an ad for one more hint</Text>
-        </Pressable>
-      )}
-
-      <ScrollView style={styles.wordListScroll} contentContainerStyle={styles.wordList} showsVerticalScrollIndicator={false}>
-        {game.puzzle.words.map((word) => {
-          const found = foundSet.has(word);
-          return (
-            <View
-              key={word}
-              style={[
-                styles.wordChip,
-                { backgroundColor: found ? '#e6e6eb' : colors.card, borderColor: found ? '#e6e6eb' : colors.border },
-              ]}
-            >
-              {found && <Feather name="check" size={11} color="#777783" />}
-              <Text style={[styles.wordText, { color: found ? colors.found : colors.foreground }, found && styles.wordFound]}>
-                {word}
-              </Text>
+      <View style={styles.playArea}>
+        <View style={[styles.gridWrap, { width: boardSize }]}>
+          <LetterGrid
+            puzzle={game.puzzle}
+            foundWords={game.foundWords}
+            hintCells={hintCells}
+            onSelection={onSelection}
+          />
+          {!!notice && (
+            <View pointerEvents="none" style={[styles.notice, { backgroundColor: colors.navy }]}>
+              <Text style={styles.noticeText}>{notice}</Text>
             </View>
-          );
-        })}
-      </ScrollView>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.wordSection}>
+        <View style={styles.wordHeading}>
+          <Text style={[styles.wordLabel, { color: colors.mutedForeground }]}>FIND THESE WORDS</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Use a hint"
+            disabled={game.hintsLeft <= 0}
+            testID="hint-button"
+            onPress={() => {
+              const used = showHint();
+              setNotice(used ? 'Follow the yellow highlight' : 'No hints remaining');
+              if (used) void audioService.play('tap');
+            }}
+            style={({ pressed }) => [
+              styles.hintButton,
+              { backgroundColor: '#fff2ca', opacity: game.hintsLeft <= 0 ? 0.45 : pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Feather name="sun" size={15} color="#a76c05" />
+            <Text style={styles.hintText}>Hint</Text>
+            <View style={styles.hintBadge}><Text style={styles.hintCount}>{game.hintsLeft}</Text></View>
+          </Pressable>
+        </View>
+        {game.hintsLeft === 0 && adProvider.state === 'ready' && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={async () => {
+              const granted = await requestRewardedHint();
+              setNotice(granted ? 'Extra hint added' : 'The ad was not completed');
+            }}
+            style={({ pressed }) => [styles.rewardedButton, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Feather name="play-circle" size={14} color={colors.primary} />
+            <Text style={[styles.rewardedText, { color: colors.primary }]}>Watch an ad for one more hint</Text>
+          </Pressable>
+        )}
+        <ScrollView style={styles.wordListScroll} contentContainerStyle={styles.wordList} showsVerticalScrollIndicator={false}>
+          {game.puzzle.words.map((word) => {
+            const found = foundSet.has(word);
+            return (
+              <View
+                key={word}
+                style={[
+                  styles.wordChip,
+                  { backgroundColor: found ? '#e6e6eb' : colors.card, borderColor: found ? '#e6e6eb' : colors.border },
+                ]}
+              >
+                {found && <Feather name="check" size={11} color="#777783" />}
+                <Text style={[styles.wordText, { color: found ? colors.found : colors.foreground }, found && styles.wordFound]}>
+                  {word}
+                </Text>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
       <Text style={[styles.dragHint, { color: colors.mutedForeground }]}>Drag across letters in a straight line</Text>
     </SafeAreaView>
   );
@@ -176,23 +183,25 @@ function formatTime(total: number) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 17 },
-  top: { flexDirection: 'row', alignItems: 'center', minHeight: 50, marginTop: 2 },
+  top: { width: '100%', maxWidth: 520, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', minHeight: 50, marginTop: 2 },
   categoryHeading: { flex: 1, alignItems: 'center' },
   categoryName: { fontSize: 15, fontWeight: '800' },
   modeCaption: { fontSize: 8, fontWeight: '800', letterSpacing: 1.2, marginTop: 4 },
   scorePill: { minWidth: 59, height: 35, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   scoreText: { fontSize: 13, fontWeight: '800' },
-  timerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, marginBottom: 10 },
+  timerRow: { width: '100%', maxWidth: 520, alignSelf: 'center', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, marginBottom: 10 },
   wordsProgress: { flexDirection: 'row', alignItems: 'baseline' },
   wordsCount: { fontSize: 22, fontWeight: '900' },
   wordsDivider: { fontSize: 13, fontWeight: '600' },
   timer: { minWidth: 94, height: 37, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   timerText: { fontSize: 15, fontVariant: ['tabular-nums'], fontWeight: '800' },
-  progressTrack: { width: '100%', height: 5, backgroundColor: '#e2e2e9', borderRadius: 4, overflow: 'hidden', marginBottom: 13 },
+  progressTrack: { width: '100%', maxWidth: 520, alignSelf: 'center', height: 5, backgroundColor: '#e2e2e9', borderRadius: 4, overflow: 'hidden', marginBottom: 13 },
   progressFill: { height: 5, borderRadius: 4 },
-  gridWrap: { width: '100%', position: 'relative' },
+  playArea: { flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center' },
+  gridWrap: { aspectRatio: 1, maxWidth: 520, alignSelf: 'center', position: 'relative' },
   notice: { position: 'absolute', alignSelf: 'center', bottom: 12, borderRadius: 16, paddingVertical: 8, paddingHorizontal: 14 },
   noticeText: { color: '#ffffff', fontWeight: '800', fontSize: 12 },
+  wordSection: { width: '100%', maxWidth: 520, alignSelf: 'center' },
   wordHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, marginBottom: 10 },
   wordLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 1.1 },
   hintButton: { borderRadius: 14, minHeight: 31, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9 },
@@ -206,7 +215,7 @@ const styles = StyleSheet.create({
   wordChip: { borderWidth: 1, borderRadius: 10, minHeight: 28, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 4 },
   wordText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
   wordFound: { textDecorationLine: 'line-through' },
-  dragHint: { textAlign: 'center', fontSize: 10, paddingTop: 8, paddingBottom: 3 },
+  dragHint: { width: '100%', maxWidth: 520, alignSelf: 'center', textAlign: 'center', fontSize: 10, paddingTop: 8, paddingBottom: 3 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 38 },
   emptyIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   emptyTitle: { fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 19 },

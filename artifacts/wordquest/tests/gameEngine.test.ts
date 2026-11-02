@@ -17,6 +17,7 @@ import {
 } from '../src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS, normalizeProgress } from '../src/engine/progression';
 import { elapsedMilliseconds, shouldRunGameClock } from '../src/engine/gameClock';
+import { getGameBoardSize } from '../src/engine/gameLayout';
 import { pointToGridCell, straightLineBetween } from '../src/engine/gridTouch';
 import { MockAdProvider } from '../src/services/ads';
 import { HIGHLIGHT_COLORS } from '../src/theme/highlights';
@@ -71,6 +72,26 @@ describe('grid size and generation', () => {
 
   it('fails clearly when a word cannot fit instead of omitting it', () => {
     expect(() => generatePuzzle(['PNEUMONOULTRAMICROSCOPICS'])).toThrow(/longer than the 12×12 puzzle grid/);
+  });
+
+  it('keeps every Animals target word selectable from its generated placement', () => {
+    const animals = CATEGORIES.find((category) => category.id === 'animals')!;
+    const puzzle = generatePuzzle(animals.words, seededRandom(2026));
+    const foundWords: string[] = [];
+
+    expect(puzzle.words).toEqual(animals.words);
+    expect(puzzle.placements).toHaveLength(8);
+    for (const placement of puzzle.placements) {
+      const selected = selectionWord(puzzle.grid, placement.cells);
+      expect(selected).toBe(placement.word);
+      expect(resolveWordSelection(selected ?? '', puzzle.words, foundWords, [], new Set())).toEqual({
+        kind: 'puzzle',
+        word: placement.word,
+      });
+      foundWords.push(placement.word);
+    }
+
+    expect([...foundWords].sort()).toEqual([...animals.words].sort());
   });
 });
 
@@ -263,6 +284,14 @@ describe('game clock lifecycle', () => {
 });
 
 describe('native grid touch geometry', () => {
+  it('sizes the board for desktop, tablet, and mobile viewports', () => {
+    expect(getGameBoardSize(1440, 900)).toBe(520);
+    expect(getGameBoardSize(768, 1024)).toBe(520);
+    expect(getGameBoardSize(390, 844)).toBe(356);
+    expect(getGameBoardSize(390, 640)).toBe(290);
+    expect(getGameBoardSize(320, 300)).toBe(0);
+  });
+
   it('maps touch points through the grid inset and clamps edge touches', () => {
     expect(pointToGridCell(5, 5, 300, 10)).toEqual({ row: 0, col: 0 });
     expect(pointToGridCell(295, 295, 300, 10)).toEqual({ row: 9, col: 9 });

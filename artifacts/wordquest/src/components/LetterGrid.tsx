@@ -25,6 +25,7 @@ export default function LetterGrid({ puzzle, foundWords, hintCells, onSelection 
   const [selectedCells, setSelectedCells] = useState<Position[]>([]);
   const selectedCellsRef = useRef<Position[]>([]);
   const pulse = useMemo(() => new Animated.Value(0.2), []);
+  const letterFontSize = Math.min(28, Math.max(14, (boardWidth / puzzle.size) * 0.44));
   const isHinted = useCallback(
     (row: number, col: number) => hintCells.some((cell) => cell.row === row && cell.col === col),
     [hintCells],
@@ -139,7 +140,7 @@ export default function LetterGrid({ puzzle, foundWords, hintCells, onSelection 
                     allowFontScaling={false}
                     style={[
                       styles.letter,
-                      { color: foundColor ? colors.found : colors.foreground },
+                      { color: foundColor ? colors.found : colors.foreground, fontSize: letterFontSize },
                       selectedHere && { color: colors.primary, fontWeight: '900' },
                     ]}
                   >
