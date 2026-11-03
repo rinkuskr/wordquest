@@ -309,16 +309,6 @@ describe('native grid touch geometry', () => {
 });
 
 describe('advertising is optional and gated', () => {
-  it('waits for every second eligible transition and the cooldown', () => {
-    const ads = new MockAdProvider();
-    expect(ads.shouldShowInterstitial(100_000, true)).toBe(false);
-    expect(ads.shouldShowInterstitial(100_000, true)).toBe(false);
-    expect(ads.shouldShowInterstitial(100_000)).toBe(false);
-    expect(ads.shouldShowInterstitial(100_001)).toBe(true);
-    expect(ads.shouldShowInterstitial(110_000)).toBe(false);
-    expect(ads.shouldShowInterstitial(110_001)).toBe(false);
-  });
-
   it('does not grant hints when a rewarded ad is unavailable', async () => {
     const ads = new MockAdProvider();
     await expect(ads.showRewarded()).resolves.toEqual({ state: 'disabled', rewarded: false });

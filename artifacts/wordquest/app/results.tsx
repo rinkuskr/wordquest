@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -13,8 +13,15 @@ export default function ResultsScreen() {
   const colors = useColors();
   const router = useRouter();
   const { summary, selectCategory, resetSummary } = useGame();
+  const completionTransitionHandled = useRef(false);
   const currentIndex = summary ? CATEGORIES.findIndex((item) => item.id === summary.categoryId) : -1;
   const nextCategory = CATEGORIES[currentIndex + 1];
+
+  const recordCompletedTransition = () => {
+    if (!summary?.completed || completionTransitionHandled.current) return;
+    completionTransitionHandled.current = true;
+    void adProvider.recordCompletedPuzzleTransition();
+  };
 
   if (!summary) {
     return (
@@ -82,7 +89,7 @@ export default function ResultsScreen() {
             title={summary.completed && nextCategory ? 'Next world' : 'Play again'}
             icon={summary.completed && nextCategory ? 'arrow-right' : 'rotate-cw'}
             onPress={() => {
-              void adProvider.showInterstitial();
+              recordCompletedTransition();
               if (summary.completed && nextCategory) selectCategory(nextCategory.id);
               resetSummary();
               router.replace('/modes');
@@ -92,7 +99,7 @@ export default function ResultsScreen() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              void adProvider.showInterstitial();
+              recordCompletedTransition();
               resetSummary();
               router.replace('/');
             }}

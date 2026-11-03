@@ -1,11 +1,13 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { CoinPill, IconButton, PrimaryButton } from '@/src/components/ui';
+import AdBannerSlot from '@/src/components/AdBannerSlot';
 import { useGame } from '@/src/game/GameProvider';
+import { adProvider } from '@/src/services/ads';
 import { audioService } from '@/src/services/audio';
 
 const tiles = [
@@ -18,9 +20,17 @@ export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
   const { progress, toggleSound } = useGame();
+
+  const openPrivacyOptions = async () => {
+    const opened = await adProvider.showPrivacyOptionsForm();
+    if (!opened) {
+      Alert.alert('Privacy options', 'No privacy options are currently required for this device.');
+    }
+  };
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.topBar}>
           <View style={styles.brand}>
             <View style={[styles.brandMark, { backgroundColor: colors.navy }]}>
@@ -118,13 +128,27 @@ export default function HomeScreen() {
           <Text style={[styles.secondaryText, { color: colors.mutedForeground }]}>Explore the 15 categories</Text>
           <Feather name="arrow-right" size={15} color={colors.mutedForeground} />
         </Pressable>
+        {Platform.OS === 'android' && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Privacy options"
+            testID="privacy-options"
+            onPress={() => void openPrivacyOptions()}
+            style={({ pressed }) => [styles.privacyLink, { opacity: pressed ? 0.65 : 1 }]}
+          >
+            <Feather name="shield" size={13} color={colors.mutedForeground} />
+            <Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Privacy options</Text>
+          </Pressable>
+        )}
       </ScrollView>
+      <AdBannerSlot />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  scroll: { flex: 1 },
   content: { paddingHorizontal: 22, paddingTop: 9, paddingBottom: 30 },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 46 },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 9 },
@@ -156,4 +180,6 @@ const styles = StyleSheet.create({
   playButton: { marginTop: 2 },
   secondaryLink: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: 8, paddingVertical: 18 },
   secondaryText: { fontSize: 13, fontWeight: '700' },
+  privacyLink: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: 6, paddingVertical: 9 },
+  privacyText: { fontSize: 10, fontWeight: '700' },
 });

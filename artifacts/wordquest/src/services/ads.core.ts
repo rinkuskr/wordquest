@@ -12,10 +12,50 @@ export interface AdsInitializationOptions {
 
 export interface AdsProvider {
   readonly state: AdState;
+  subscribe(listener: () => void): () => void;
   initialize(options?: AdsInitializationOptions): Promise<AdState>;
-  shouldShowInterstitial(now?: number, gestureActive?: boolean): boolean;
-  showInterstitial(now?: number): Promise<AdResult>;
+  showPrivacyOptionsForm(): Promise<boolean>;
+  recordCompletedPuzzleTransition(): Promise<AdResult>;
   showRewarded(): Promise<AdResult>;
+}
+
+export const COMPLETIONS_PER_INTERSTITIAL = 3;
+export const INTERSTITIAL_MIN_INTERVAL_MS = 3 * 60 * 1000;
+export const INTERSTITIAL_STORAGE_KEY = '@wordquest/ads/interstitial-schedule';
+
+export interface InterstitialSchedule {
+  completedSinceLastShown: number;
+  lastShownAt: number;
+}
+
+export const INITIAL_INTERSTITIAL_SCHEDULE: InterstitialSchedule = {
+  completedSinceLastShown: 0,
+  lastShownAt: 0,
+};
+
+export function recordPuzzleCompletion(
+  current: InterstitialSchedule,
+  now: number,
+): { schedule: InterstitialSchedule; eligible: boolean } {
+  const schedule = {
+    ...current,
+    completedSinceLastShown: current.completedSinceLastShown + 1,
+  };
+  const intervalPassed =
+    schedule.lastShownAt === 0 || now - schedule.lastShownAt >= INTERSTITIAL_MIN_INTERVAL_MS;
+
+  return {
+    schedule,
+    eligible:
+      schedule.completedSinceLastShown >= COMPLETIONS_PER_INTERSTITIAL && intervalPassed,
+  };
+}
+
+export function markInterstitialShown(
+  schedule: InterstitialSchedule,
+  now: number,
+): InterstitialSchedule {
+  return { completedSinceLastShown: 0, lastShownAt: now };
 }
 
 /** Google sample IDs only. Replace only after a separate production review. */
@@ -33,24 +73,20 @@ export const nativeAdsConfig = {
  */
 export class MockAdProvider implements AdsProvider {
   readonly state: AdState = 'disabled';
-  private lastInterstitialAt = 0;
-  private eligibleTransitionCount = 0;
+
+  subscribe(_listener: () => void): () => void {
+    return () => undefined;
+  }
 
   async initialize(): Promise<AdState> {
     return this.state;
   }
 
-  shouldShowInterstitial(now = Date.now(), gestureActive = false): boolean {
-    if (gestureActive) return false;
-    this.eligibleTransitionCount += 1;
-    const everySecondEligible = this.eligibleTransitionCount % 2 === 0;
-    if (!everySecondEligible || now - this.lastInterstitialAt < 60_000) return false;
-    this.lastInterstitialAt = now;
-    return true;
+  async showPrivacyOptionsForm(): Promise<boolean> {
+    return false;
   }
 
-  async showInterstitial(now = Date.now()): Promise<AdResult> {
-    this.shouldShowInterstitial(now);
+  async recordCompletedPuzzleTransition(): Promise<AdResult> {
     return { state: this.state, rewarded: false };
   }
 

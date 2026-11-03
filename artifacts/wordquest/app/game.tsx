@@ -9,7 +9,7 @@ import LetterGrid from '@/src/components/LetterGrid';
 import { getCategory } from '@/src/data/categories';
 import { useGame } from '@/src/game/GameProvider';
 import { audioService } from '@/src/services/audio';
-import { adProvider } from '@/src/services/ads';
+import { useAdsState } from '@/src/services/useAdsState';
 import { useGameClock } from '@/src/hooks/useGameClock';
 import { getGameBoardSize } from '@/src/engine/gameLayout';
 
@@ -20,6 +20,7 @@ export default function GameScreen() {
   const router = useRouter();
   const { game, hintCells, showHint, requestRewardedHint, recordSelection, resumeClock, pauseClock, syncClock } = useGame();
   const [notice, setNotice] = useState<string | null>(null);
+  const adsState = useAdsState();
   const category = game ? getCategory(game.categoryId) : undefined;
   const boardSize = getGameBoardSize(width, height - insets.top - insets.bottom);
 
@@ -137,7 +138,7 @@ export default function GameScreen() {
             <View style={styles.hintBadge}><Text style={styles.hintCount}>{game.hintsLeft}</Text></View>
           </Pressable>
         </View>
-        {game.hintsLeft === 0 && adProvider.state === 'ready' && (
+        {game.hintsLeft === 0 && adsState === 'ready' && (
           <Pressable
             accessibilityRole="button"
             onPress={async () => {

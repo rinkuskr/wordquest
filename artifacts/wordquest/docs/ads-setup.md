@@ -1,40 +1,43 @@
 # Optional AdMob setup
 
-WordQuest remains free and ad-supported, but the current foundation is test-only
-and dormant. No ad placements are mounted, and the app does not initialize the
-Mobile Ads SDK at launch. Existing game behavior remains independent of ads.
+WordQuest remains free and ad-supported. Ad placements use Google's official
+test IDs only; gameplay, local saves, puzzle completion, and hints remain
+independent of ad availability.
 
-## Phase 1 foundation
+## Current placements and gating
 
-- Expo SDK 57 uses `react-native-google-mobile-ads` 17.4.0 and
-  `expo-build-properties` 57.0.22. A custom native build is required; Expo Go
-  and Expo Web use the no-op provider.
-- `app.json` uses Google's sample Android and iOS App IDs, delays app measurement
-  until consent, sets Android min SDK 24, and preserves the UMP ProGuard rule.
-- `src/services/ads.android.ts` contains the Android provider. Its `initialize()`
-  method gathers UMP consent, checks `canRequestAds`, and only then initializes
-  Google Mobile Ads. It is intentionally not called by the app yet, so the
-  existing result callbacks and hidden rewarded-hint control remain no-ops.
-- `src/services/ads.core.ts` contains Google's sample banner, interstitial, and
-  rewarded unit IDs and the mock fallback. Do not replace them with production
-  IDs during development.
+- Home and category screens mount an anchored adaptive banner in a reserved
+  bottom slot after UMP permits ad requests. The puzzle and results screens have
+  no banner.
+- The existing extra-hint action requests a rewarded ad. A hint is granted only
+  after the rewarded SDK emits its earned-reward callback; failure, no fill,
+  timeout, or early close grants nothing.
+- Interstitial eligibility is counted from successful puzzle completions and
+  evaluated only when the user taps a results-screen transition. It requires at
+  least three completions since the previous shown ad and a three-minute
+  minimum interval. An unavailable ad never delays navigation.
+- The Android provider persists the interstitial schedule locally. Web and
+  unsupported platforms use the no-op provider.
 
-## Before enabling placements
+## Consent and development
 
-1. Configure the applicable privacy/consent messages in AdMob. For regulated
-   regions, do not initialize the ads SDK until UMP has completed and
-   `canRequestAds` is true. Add an in-app privacy-options entry point where
-   required before public distribution.
-2. Test on an Android development build, not Expo Go. For consent testing, call
-   `adProvider.initialize({ debugGeography: 'EEA',
-   testDeviceIdentifiers: ['<device-hash>'] })` in a development-only path. Get
-   the hashed test-device ID from native Google Mobile Ads logs; reset UMP state
-   between repeated tests with `AdsConsent.reset()`.
-3. Keep interstitials on eligible between-level transitions only, no more than
-   every second eligible trigger and at least 60 seconds apart.
-4. Grant an extra hint only from the rewarded-ad completion callback. If loading,
-   playback, or reward confirmation fails, leave the hint balance unchanged.
+The app calls `AdsConsent.gatherConsent()` at launch and checks
+`canRequestAds` before initializing Google Mobile Ads or mounting banners. If
+consent gathering fails, the provider checks UMP's cached consent result and
+fails closed if it cannot confirm requests are allowed. The home screen exposes
+a privacy-options entry point; UMP presents its form when the current message
+requires it.
 
-The Google Mobile Ads Android library contributes `INTERNET`, `WAKE_LOCK`, and
-`ACCESS_NETWORK_STATE` manifest permissions; it does not require a runtime
-permission prompt for these. No production App ID or ad-unit ID is bundled.
+To test UMP, configure the relevant consent messages in AdMob and use an Android
+development build, not Expo Go. A development-only test can call
+`adProvider.initialize({ debugGeography: 'EEA',
+testDeviceIdentifiers: ['<device-hash>'] })`; get the hashed device ID from
+native Google Mobile Ads logs. `AdsConsent.reset()` resets UMP state between
+tests. Use only the Google sample App IDs and unit IDs in `src/services/ads.core.ts`.
+
+Expo SDK 57 uses `react-native-google-mobile-ads` 17.4.0 and
+`expo-build-properties` 57.0.22. Android min SDK is 24, and the UMP ProGuard
+keep rule is configured. A custom native build is required; Expo Go and Expo Web
+use the no-op provider. The ads library contributes `INTERNET`, `WAKE_LOCK`,
+and `ACCESS_NETWORK_STATE`; these do not trigger runtime permission prompts.
+No production ID is bundled.
