@@ -13,7 +13,7 @@ import { audioService } from '@/src/services/audio';
 export default function CategoriesScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { progress, selectCategory } = useGame();
+  const { progress, ready, selectCategory } = useGame();
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <View style={styles.content}>
@@ -21,7 +21,7 @@ export default function CategoriesScreen() {
           title="Choose a world"
           subtitle="Complete one to unlock the next"
           onBack={() => router.back()}
-          right={<CoinPill amount={progress.coins} />}
+          right={ready ? <CoinPill amount={progress.coins} /> : undefined}
         />
         <View style={styles.collectionLine}>
           <View style={[styles.line, { backgroundColor: colors.primary }]} />
@@ -41,8 +41,8 @@ export default function CategoriesScreen() {
             return (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${item.name}${unlocked ? '' : ', locked'}`}
-                disabled={!unlocked}
+                accessibilityLabel={`${item.name}${!ready ? ', progress unavailable' : unlocked ? '' : ', locked'}`}
+                disabled={!ready || !unlocked}
                 testID={`category-${item.id}`}
                 onPress={() => {
                   selectCategory(item.id);
@@ -70,7 +70,13 @@ export default function CategoriesScreen() {
                 </View>
                 <Text style={[styles.name, { color: colors.foreground }]}>{item.name}</Text>
                 <Text style={[styles.status, { color: completed ? '#28a667' : colors.mutedForeground }]}>
-                  {completed ? 'COMPLETED' : unlocked ? 'READY TO EXPLORE' : `COMPLETE ${CATEGORIES[index - 1]?.name.toUpperCase() ?? 'PREVIOUS'}`}
+                  {!ready
+                    ? 'PROGRESS UNAVAILABLE'
+                    : completed
+                      ? 'COMPLETED'
+                      : unlocked
+                        ? 'READY TO EXPLORE'
+                        : `COMPLETE ${CATEGORIES[index - 1]?.name.toUpperCase() ?? 'PREVIOUS'}`}
                 </Text>
               </Pressable>
             );

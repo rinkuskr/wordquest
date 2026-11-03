@@ -19,7 +19,7 @@ const tiles = [
 export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { progress, toggleSound } = useGame();
+  const { progress, ready, progressLoadStatus, toggleSound } = useGame();
 
   const openPrivacyOptions = async () => {
     const opened = await adProvider.showPrivacyOptionsForm();
@@ -39,7 +39,7 @@ export default function HomeScreen() {
             <Text style={[styles.brandName, { color: colors.foreground }]}>WordQuest</Text>
           </View>
           <View style={styles.actions}>
-            <CoinPill amount={progress.coins} />
+            {ready && <CoinPill amount={progress.coins} />}
             <IconButton
               icon={progress.soundEnabled ? 'volume-2' : 'volume-x'}
               accessibilityLabel={progress.soundEnabled ? 'Turn sound off' : 'Turn sound on'}
@@ -100,12 +100,18 @@ export default function HomeScreen() {
           </View>
           <View style={styles.progressCopy}>
             <Text style={[styles.progressTitle, { color: colors.foreground }]}>
-              {progress.completedLevels.length === 0
+              {!ready
+                ? progressLoadStatus === 'loading'
+                  ? 'Loading your saved progress'
+                  : 'Your saved progress is unavailable'
+                : progress.completedLevels.length === 0
                 ? 'Your first chapter is ready'
                 : `${progress.completedLevels.length} chapter${progress.completedLevels.length === 1 ? '' : 's'} complete`}
             </Text>
             <Text style={[styles.progressSubtitle, { color: colors.mutedForeground }]}>
-              Start with Animals and unlock each next world.
+              {ready
+                ? 'Start with Animals and unlock each next world.'
+                : 'Your saved coins and unlocked worlds will appear after progress loads.'}
             </Text>
           </View>
           <Feather name="chevron-right" size={19} color={colors.mutedForeground} />
@@ -114,6 +120,7 @@ export default function HomeScreen() {
         <PrimaryButton
           title="Choose a category"
           icon="play"
+          disabled={!ready}
           onPress={() => {
             void audioService.play('tap');
             router.push('/categories');
@@ -122,8 +129,9 @@ export default function HomeScreen() {
           style={styles.playButton}
         />
         <Pressable
+          disabled={!ready}
           onPress={() => router.push('/categories')}
-          style={({ pressed }) => [styles.secondaryLink, { opacity: pressed ? 0.65 : 1 }]}
+          style={({ pressed }) => [styles.secondaryLink, { opacity: !ready ? 0.45 : pressed ? 0.65 : 1 }]}
         >
           <Text style={[styles.secondaryText, { color: colors.mutedForeground }]}>Explore the 15 categories</Text>
           <Feather name="arrow-right" size={15} color={colors.mutedForeground} />

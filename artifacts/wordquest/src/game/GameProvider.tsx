@@ -16,8 +16,17 @@ import { CATEGORIES, getCategory } from '@/src/data/categories';
 import { elapsedMilliseconds, monotonicNow } from '@/src/engine/gameClock';
 import { consumeHint, generatePuzzle, getTimeBonus, isTimeExpired, resolveWordSelection, scoreSelection, selectionWord } from '@/src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS } from '@/src/engine/progression';
-import { loadProgress, saveProgress } from '@/src/services/persistence';
+import {
+  acceptRecoveredProgress as acceptStoredProgressRecovery,
+  loadProgress,
+  saveProgress,
+  startFreshProgress as startFreshStoredProgress,
+  type ProgressLoadResult,
+} from '@/src/services/persistence';
 import type { CategoryId, GameMode, GameSummary, Placement, Position, Puzzle, SavedProgress } from '@/src/types/game';
+
+type ProgressLoadStatus = 'loading' | 'ready' | 'read-error' | 'recovery-required';
+type ProgressRecovery = Extract<ProgressLoadResult, { status: 'recovery-required' }>;
 
 export interface ActiveGame {
   categoryId: CategoryId;
@@ -36,11 +45,18 @@ export interface ActiveGame {
 interface GameContextValue {
   progress: SavedProgress;
   ready: boolean;
+  progressLoadStatus: ProgressLoadStatus;
+  progressRecovery: ProgressRecovery | null;
+  progressSaveError: string | null;
   selectedCategoryId: CategoryId;
   game: ActiveGame | null;
   summary: GameSummary | null;
   hintCells: Position[];
   error: string | null;
+  retryLoadProgress: () => Promise<void>;
+  acceptRecoveredProgress: () => Promise<boolean>;
+  startFreshProgress: () => Promise<boolean>;
+  retrySaveProgress: () => Promise<boolean>;
   selectCategory: (id: CategoryId) => void;
   startGame: (mode: GameMode) => boolean;
   recordSelection: (cells: Position[]) => 'puzzle' | 'bonus' | 'invalid' | 'duplicate';
@@ -58,6 +74,9 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const router = useRouter();
   const [progress, setProgress] = useState<SavedProgress>(INITIAL_PROGRESS);
   const [ready, setReady] = useState(false);
+  const [progressLoadStatus, setProgressLoadStatus] = useState<ProgressLoadStatus>('loading');
+  const [progressRecovery, setProgressRecovery] = useState<ProgressRecovery | null>(null);
+  const [progressSaveError, setProgressSaveError] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<CategoryId>('animals');
   const [game, setGame] = useState<ActiveGame | null>(null);
   const [summary, setSummary] = useState<GameSummary | null>(null);
@@ -68,22 +87,36 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const hintTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCountdownSecond = useRef<number | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    loadProgress().then((loaded) => {
-      if (!alive) return;
-      setProgress(loaded);
-      setReady(true);
-    });
-    return () => {
-      alive = false;
-    };
+  const retryLoadProgress = useCallback(async () => {
+    setReady(false);
+    setProgressLoadStatus('loading');
+    try {
+      const result = await loadProgress();
+      if (result.status === 'loaded') {
+        setProgress(result.progress);
+        setReady(true);
+        setProgressLoadStatus('ready');
+        setProgressRecovery(null);
+        return;
+      }
+      setProgressLoadStatus(result.status);
+      setProgressRecovery(result.status === 'recovery-required' ? result : null);
+    } catch {
+      setProgressLoadStatus('read-error');
+      setProgressRecovery(null);
+    }
   }, []);
 
   useEffect(() => {
-    if (ready) void saveProgress(progress).catch(() => {
-      setError('Progress could not be saved. Check available device storage.');
-    });
+    void retryLoadProgress();
+  }, [retryLoadProgress]);
+
+  useEffect(() => {
+    if (ready) {
+      void saveProgress(progress).catch(() => {
+        setProgressSaveError("Progress couldn't be saved. Your current session is still available; retry to save it.");
+      });
+    }
   }, [progress, ready]);
 
   useEffect(() => {
@@ -104,6 +137,10 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   }, []);
 
   const startGame = useCallback((mode: GameMode) => {
+    if (!ready) {
+      setError('Load or recover your saved progress before starting a puzzle.');
+      return false;
+    }
     const category = getCategory(selectedCategoryId);
     if (!category || category.words.length === 0) {
       setError('This category does not have any puzzle words configured.');
@@ -135,7 +172,53 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       setError(caught instanceof Error ? caught.message : 'Could not create this puzzle.');
       return false;
     }
-  }, [selectedCategoryId]);
+  }, [ready, selectedCategoryId]);
+
+  const acceptRecoveredProgress = useCallback(async () => {
+    if (!progressRecovery?.recoveredProgress || !progressRecovery.backupSaved) return false;
+    try {
+      const recovered = await acceptStoredProgressRecovery();
+      setProgress(recovered);
+      setProgressRecovery(null);
+      setProgressLoadStatus('ready');
+      setReady(true);
+      return true;
+    } catch {
+      setProgressRecovery((current) => current
+        ? { ...current, message: 'Recovered progress could not be saved. The preserved original data is unchanged; retry recovery.' }
+        : current);
+      return false;
+    }
+  }, [progressRecovery]);
+
+  const startFreshProgress = useCallback(async () => {
+    if (!progressRecovery?.backupSaved) return false;
+    try {
+      const fresh = await startFreshStoredProgress();
+      setProgress(fresh);
+      setProgressRecovery(null);
+      setProgressLoadStatus('ready');
+      setReady(true);
+      return true;
+    } catch {
+      setProgressRecovery((current) => current
+        ? { ...current, message: 'Fresh progress could not be saved. The preserved original data is unchanged; retry when storage is available.' }
+        : current);
+      return false;
+    }
+  }, [progressRecovery]);
+
+  const retrySaveProgress = useCallback(async () => {
+    if (!ready) return false;
+    try {
+      await saveProgress(progress);
+      setProgressSaveError(null);
+      return true;
+    } catch {
+      setProgressSaveError("Progress still couldn't be saved. Your current session is still available; retry again when device storage is available.");
+      return false;
+    }
+  }, [progress, ready]);
 
   const finishGame = useCallback((current: ActiveGame, completed: boolean) => {
     if (completionHandled.current) return;
@@ -333,11 +416,18 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const value = useMemo<GameContextValue>(() => ({
     progress,
     ready,
+    progressLoadStatus,
+    progressRecovery,
+    progressSaveError,
     selectedCategoryId,
     game,
     summary,
     hintCells,
     error,
+    retryLoadProgress,
+    acceptRecoveredProgress,
+    startFreshProgress,
+    retrySaveProgress,
     selectCategory,
     startGame,
     recordSelection,
@@ -349,7 +439,9 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     toggleSound,
     resetSummary,
   }), [
-    progress, ready, selectedCategoryId, game, summary, hintCells, error,
+    progress, ready, progressLoadStatus, progressRecovery, progressSaveError,
+    selectedCategoryId, game, summary, hintCells, error,
+    retryLoadProgress, acceptRecoveredProgress, startFreshProgress, retrySaveProgress,
     selectCategory, startGame, recordSelection, showHint, requestRewardedHint, resumeClock,
     pauseClock, syncClock, toggleSound, resetSummary,
   ]);
