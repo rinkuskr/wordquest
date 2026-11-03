@@ -59,6 +59,8 @@
   "dependencies": {
     "@expo/metro-runtime": "~57.0.17",
     "expo-asset": "~57.0.20",
-    "expo-audio": "~57.0.5"
+    "expo-audio": "~57.0.5",
+    "expo-build-properties": "~57.0.22",
+    "react-native-google-mobile-ads": "17.4.0"
   }
 }
