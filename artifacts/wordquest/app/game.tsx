@@ -7,6 +7,7 @@ import { useColors } from '@/hooks/useColors';
 import { IconButton } from '@/src/components/ui';
 import LetterGrid from '@/src/components/LetterGrid';
 import { getCategory } from '@/src/data/categories';
+import { getCategoryPuzzlePlan } from '@/src/data/difficulty';
 import { useGame } from '@/src/game/GameProvider';
 import { audioService } from '@/src/services/audio';
 import { useAdsState } from '@/src/services/useAdsState';
@@ -61,7 +62,8 @@ export default function GameScreen() {
     );
   }
 
-  const remaining = Math.max(0, 120 - game.elapsedSeconds);
+  const plan = getCategoryPuzzlePlan(category);
+  const remaining = Math.max(0, game.timeLimitSeconds - game.elapsedSeconds);
   const timeText = game.mode === 'time' ? remaining : game.elapsedSeconds;
   const isUrgent = game.mode === 'time' && remaining < 30;
   const foundSet = new Set(game.foundWords);
@@ -73,7 +75,7 @@ export default function GameScreen() {
         <View style={styles.categoryHeading}>
           <Text style={[styles.categoryName, { color: colors.foreground }]}>{category.emoji} {category.name}</Text>
           <Text style={[styles.modeCaption, { color: colors.mutedForeground }]}>
-            {game.mode === 'classic' ? 'CLASSIC MODE' : 'TIME MODE'}
+            {`${plan.tier.toUpperCase()} · ${game.mode === 'classic' ? 'CLASSIC MODE' : 'TIME MODE'}`}
           </Text>
         </View>
         <View style={[styles.scorePill, { backgroundColor: '#fff0dc' }]}>

@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { CoinPill, PageHeader } from '@/src/components/ui';
 import AdBannerSlot from '@/src/components/AdBannerSlot';
-import { CATEGORIES, isCategoryUnlocked } from '@/src/data/categories';
+import { CATEGORIES, CATEGORY_DIFFICULTY, isCategoryUnlocked } from '@/src/data/categories';
 import { useGame } from '@/src/game/GameProvider';
 import { audioService } from '@/src/services/audio';
 
@@ -36,7 +36,11 @@ export default function CategoriesScreen() {
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           renderItem={({ item, index }) => {
-            const unlocked = isCategoryUnlocked(index, progress.completedLevels);
+            const unlocked = isCategoryUnlocked(
+              index,
+              progress.completedLevels,
+              progress.unlockedCategories,
+            );
             const completed = progress.completedLevels.includes(item.id);
             return (
               <Pressable
@@ -69,6 +73,9 @@ export default function CategoriesScreen() {
                   )}
                 </View>
                 <Text style={[styles.name, { color: colors.foreground }]}>{item.name}</Text>
+                <Text style={[styles.difficulty, { color: colors.primary }]}>
+                  {CATEGORY_DIFFICULTY[item.id].toUpperCase()}
+                </Text>
                 <Text style={[styles.status, { color: completed ? '#28a667' : colors.mutedForeground }]}>
                   {!ready
                     ? 'PROGRESS UNAVAILABLE'
@@ -104,5 +111,6 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 23 },
   statusIcon: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   name: { marginTop: 14, fontSize: 15, fontWeight: '800' },
+  difficulty: { marginTop: 4, fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
   status: { marginTop: 5, fontSize: 8, fontWeight: '800', letterSpacing: 0.65 },
 });

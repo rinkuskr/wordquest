@@ -23,6 +23,7 @@ export interface Category {
 }
 
 export type GameMode = 'classic' | 'time';
+export type DifficultyTier = 'beginner' | 'easy' | 'intermediate' | 'advanced';
 export type Position = { row: number; col: number };
 export type Placement = { word: string; cells: Position[] };
 export interface Puzzle {
@@ -48,8 +49,9 @@ export interface GameSummary {
 }
 
 export interface SavedProgress {
-  version: 1;
+  version: 2;
   coins: number;
   completedLevels: CategoryId[];
   soundEnabled: boolean;
+  unlockedCategories: CategoryId[];
 }

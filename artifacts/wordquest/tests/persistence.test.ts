@@ -48,10 +48,11 @@ beforeEach(async () => {
 
 describe('non-destructive local progress persistence', () => {
   const saved: SavedProgress = {
-    version: 1,
+    version: 2,
     coins: 350,
     completedLevels: ['animals'],
     soundEnabled: false,
+    unlockedCategories: ['animals'],
   };
 
   it('loads valid progress successfully', async () => {
@@ -61,6 +62,32 @@ describe('non-destructive local progress persistence', () => {
       status: 'loaded',
       progress: saved,
     });
+  });
+
+  it('migrates a valid version-1 save without losing coins, completions, sound, or old unlocks', async () => {
+    const original = JSON.stringify({
+      version: 1,
+      coins: 475,
+      completedLevels: ['animals'],
+      soundEnabled: false,
+    });
+    storage.values.set(SAVE_KEY, original);
+
+    const result = await persistence.loadProgress();
+    expect(result).toMatchObject({
+      status: 'loaded',
+      progress: {
+        version: 2,
+        coins: 475,
+        completedLevels: ['animals'],
+        soundEnabled: false,
+        unlockedCategories: ['animals', 'food'],
+      },
+    });
+    if (result.status !== 'loaded') throw new Error('Expected migrated progress to load.');
+    await persistence.saveProgress(result.progress);
+
+    expect(JSON.parse(storage.values.get(SAVE_KEY) ?? '{}')).toEqual(result.progress);
   });
 
   it('saves progress after storage has loaded successfully', async () => {
@@ -79,10 +106,11 @@ describe('non-destructive local progress persistence', () => {
       status: 'read-error',
     });
     await expect(persistence.saveProgress({
-      version: 1,
+      version: 2,
       coins: 300,
       completedLevels: [],
       soundEnabled: true,
+      unlockedCategories: ['animals'],
     })).rejects.toThrow(/not been safely loaded/);
 
     expect(storage.values.get(SAVE_KEY)).toBe(original);
@@ -125,16 +153,18 @@ describe('non-destructive local progress persistence', () => {
     await persistence.loadProgress();
 
     await expect(persistence.startFreshProgress()).resolves.toEqual({
-      version: 1,
+      version: 2,
       coins: 300,
       completedLevels: [],
       soundEnabled: true,
+      unlockedCategories: ['animals'],
     });
     expect(storage.values.get(SAVE_KEY)).toBe(JSON.stringify({
-      version: 1,
+      version: 2,
       coins: 300,
       completedLevels: [],
       soundEnabled: true,
+      unlockedCategories: ['animals'],
     }));
     expect(JSON.parse(storage.values.get(BACKUP_KEY) ?? '[]')).toContain(malformed);
   });
@@ -154,19 +184,21 @@ describe('non-destructive local progress persistence', () => {
       reason: 'invalid-values',
       backupSaved: true,
       recoveredProgress: {
-        version: 1,
+        version: 2,
         coins: 300,
         completedLevels: ['animals'],
         soundEnabled: false,
+        unlockedCategories: ['animals', 'food'],
       },
     });
     expect(storage.values.get(SAVE_KEY)).toBe(invalidRaw);
 
     await expect(persistence.acceptRecoveredProgress()).resolves.toEqual({
-      version: 1,
+      version: 2,
       coins: 300,
       completedLevels: ['animals'],
       soundEnabled: false,
+      unlockedCategories: ['animals', 'food'],
     });
     expect(storage.values.get(SAVE_KEY)).not.toBe(invalidRaw);
     expect(JSON.parse(storage.values.get(BACKUP_KEY) ?? '[]')).toContain(invalidRaw);

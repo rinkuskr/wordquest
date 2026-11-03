@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CATEGORIES } from '@/src/data/categories';
 import { INITIAL_PROGRESS, normalizeProgress } from '@/src/engine/progression';
-import type { SavedProgress } from '@/src/types/game';
+import type { CategoryId, SavedProgress } from '@/src/types/game';
 
 const SAVE_KEY = 'wordquest:progress:v1';
 export const RECOVERY_BACKUP_KEY = `${SAVE_KEY}:recovery-backup`;
@@ -18,6 +18,7 @@ export type ProgressLoadResult =
     };
 
 type PersistenceAccess = 'unresolved' | 'loaded' | 'read-error' | 'recovery-required';
+type LegacySavedProgress = Omit<SavedProgress, 'version' | 'unlockedCategories'> & { version: 1 };
 
 let access: PersistenceAccess = 'unresolved';
 let pendingRecovery: Extract<ProgressLoadResult, { status: 'recovery-required' }> | null = null;
@@ -34,35 +35,43 @@ function enqueue<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
-function isValidStoredProgress(raw: unknown): raw is SavedProgress {
+function isValidCategoryIds(value: unknown): value is CategoryId[] {
+  if (!Array.isArray(value) || value.length > CATEGORIES.length) return false;
+  const validIds = new Set(CATEGORIES.map((category) => category.id));
+  const seen = new Set<string>();
+  for (const id of value) {
+    if (typeof id !== 'string' || !validIds.has(id as CategoryId) || seen.has(id)) return false;
+    seen.add(id);
+  }
+  return true;
+}
+
+function isValidStoredProgress(raw: unknown): raw is LegacySavedProgress | SavedProgress {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
   const value = raw as Record<string, unknown>;
-  const expectedKeys = ['coins', 'completedLevels', 'soundEnabled', 'version'];
+  const expectedKeys = value.version === 1
+    ? ['coins', 'completedLevels', 'soundEnabled', 'version']
+    : ['coins', 'completedLevels', 'soundEnabled', 'unlockedCategories', 'version'];
   const keys = Object.keys(value).sort();
+  expectedKeys.sort();
   if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
     return false;
   }
   if (
-    value.version !== 1 ||
+    (value.version !== 1 && value.version !== 2) ||
     typeof value.coins !== 'number' ||
     !Number.isFinite(value.coins) ||
     !Number.isInteger(value.coins) ||
     value.coins < 0 ||
     typeof value.soundEnabled !== 'boolean' ||
-    !Array.isArray(value.completedLevels) ||
-    value.completedLevels.length > CATEGORIES.length
+    !isValidCategoryIds(value.completedLevels)
   ) {
     return false;
   }
-  const validIds = new Set(CATEGORIES.map((category) => category.id));
-  const completed = new Set<string>();
-  for (const id of value.completedLevels) {
-    if (typeof id !== 'string' || !validIds.has(id as SavedProgress['completedLevels'][number]) || completed.has(id)) {
-      return false;
-    }
-    completed.add(id);
-  }
-  return true;
+  if (value.version === 1) return true;
+  if (!isValidCategoryIds(value.unlockedCategories)) return false;
+  const unlocked = new Set(value.unlockedCategories);
+  return unlocked.has('animals') && value.completedLevels.every((id) => unlocked.has(id));
 }
 
 async function preserveRawProgress(raw: string): Promise<boolean> {
@@ -122,27 +131,27 @@ async function loadProgressFromStorage(): Promise<ProgressLoadResult> {
     return result;
   }
 
-  if (!isValidStoredProgress(parsed)) {
-    const backupSaved = await preserveRawProgress(raw);
-    const result: Extract<ProgressLoadResult, { status: 'recovery-required' }> = {
-      status: 'recovery-required',
-      reason: 'invalid-values',
-      backupSaved,
-      ...(backupSaved ? { recoveredProgress: normalizeProgress(parsed) } : {}),
-      message: backupSaved
-        ? "Some saved progress values need recovery. The original data was preserved. You can use the valid values with safe defaults for invalid fields, or explicitly start fresh."
-        : "Some saved progress values are invalid, and a safety copy could not be confirmed. Nothing was overwritten. Please retry.",
-    };
-    access = 'recovery-required';
-    pendingRecovery = result;
-    return result;
+  if (isValidStoredProgress(parsed)) {
+    const progress = normalizeProgress(parsed);
+    access = 'loaded';
+    pendingRecovery = null;
+    lastSavedSerialized = raw;
+    return { status: 'loaded', progress };
   }
 
-  const progress = parsed;
-  access = 'loaded';
-  pendingRecovery = null;
-  lastSavedSerialized = raw;
-  return { status: 'loaded', progress };
+  const backupSaved = await preserveRawProgress(raw);
+  const result: Extract<ProgressLoadResult, { status: 'recovery-required' }> = {
+    status: 'recovery-required',
+    reason: 'invalid-values',
+    backupSaved,
+    ...(backupSaved ? { recoveredProgress: normalizeProgress(parsed) } : {}),
+    message: backupSaved
+      ? "Some saved progress values need recovery. The original data was preserved. You can use the valid values with safe defaults for invalid fields, or explicitly start fresh."
+      : "Some saved progress values are invalid, and a safety copy could not be confirmed. Nothing was overwritten. Please retry.",
+  };
+  access = 'recovery-required';
+  pendingRecovery = result;
+  return result;
 }
 
 export function loadProgress(): Promise<ProgressLoadResult> {

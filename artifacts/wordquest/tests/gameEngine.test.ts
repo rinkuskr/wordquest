@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { readdirSync, statSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { BONUS_WORD_COUNT, BONUS_WORDS } from '../src/data/bonusWords';
-import { CATEGORIES, hasCompleteCategoryData, isCategoryUnlocked } from '../src/data/categories';
+import {
+  CATEGORIES,
+  CATEGORY_DIFFICULTY,
+  CATEGORY_PROGRESSION_ORDER,
+  hasCompleteCategoryData,
+  isCategoryUnlocked,
+} from '../src/data/categories';
+import { getCategoryPuzzlePlan } from '../src/data/difficulty';
 import {
   consumeHint,
   generatePuzzle,
@@ -353,6 +360,9 @@ describe('selection, bonus words, and scoring', () => {
     expect(isTimeExpired('time', 119)).toBe(false);
     expect(isTimeExpired('time', 120)).toBe(true);
     expect(isTimeExpired('classic', 10_000)).toBe(false);
+    expect(isTimeExpired('time', 149, 150)).toBe(false);
+    expect(isTimeExpired('time', 150, 150)).toBe(true);
+    expect(isTimeExpired('classic', 10_000, 150)).toBe(false);
   });
 });
 
@@ -363,17 +373,21 @@ describe('hints, progression, and local data recovery', () => {
     expect(consumeHint(2, false)).toEqual({ hintsLeft: 2, consumed: false });
   });
 
-  it('unlocks only the first category or one after a completed predecessor', () => {
+  it('unlocks the first category, saved categories, or one after a completed predecessor', () => {
     expect(isCategoryUnlocked(0, [])).toBe(true);
     expect(isCategoryUnlocked(1, [])).toBe(false);
     expect(isCategoryUnlocked(1, ['animals'])).toBe(true);
     expect(isCategoryUnlocked(2, ['animals'])).toBe(false);
+    const countriesIndex = CATEGORY_PROGRESSION_ORDER.indexOf('countries');
+    expect(isCategoryUnlocked(countriesIndex, [], ['countries'])).toBe(true);
+    expect(isCategoryUnlocked(countriesIndex, ['countries'])).toBe(true);
   });
 
   it('awards a category completion only once', () => {
     const first = awardFirstCompletion(INITIAL_PROGRESS, 'animals');
     expect(first.reward).toBe(50);
     expect(first.progress.coins).toBe(350);
+    expect(first.progress.unlockedCategories).toContain('colors');
     const replay = awardFirstCompletion(first.progress, 'animals');
     expect(replay.reward).toBe(0);
     expect(replay.progress.coins).toBe(350);
@@ -388,19 +402,108 @@ describe('hints, progression, and local data recovery', () => {
       completedLevels: ['animals', 'not-a-category', 'animals'],
       soundEnabled: 'yes',
     })).toEqual({
-      version: 1,
+      version: 2,
       coins: 0,
       completedLevels: ['animals'],
       soundEnabled: true,
+      unlockedCategories: ['animals'],
     });
   });
 
-  it('keeps the 15 stable category IDs in the required order', () => {
+  it('keeps all stable category IDs in the approved progression order', () => {
     expect(CATEGORIES.map((category) => category.id)).toEqual([
-      'animals', 'food', 'sports', 'countries', 'colors', 'fruits', 'space',
-      'ocean-life', 'music', 'movies', 'nature', 'technology', 'jobs',
-      'clothing', 'vegetables',
+      'animals', 'colors', 'fruits', 'clothing', 'food', 'music', 'space',
+      'ocean-life', 'vegetables', 'nature', 'countries', 'movies', 'sports',
+      'technology', 'jobs',
     ]);
+    expect(new Set(CATEGORIES.map((category) => category.id)).size).toBe(15);
+    expect(CATEGORY_PROGRESSION_ORDER).toEqual(CATEGORIES.map((category) => category.id));
+  });
+
+  it('preserves prior unlock access when migrating old-order progress', () => {
+    const migrated = normalizeProgress({
+      version: 1,
+      coins: 725,
+      completedLevels: ['animals', 'food', 'sports'],
+      soundEnabled: false,
+    });
+    expect(migrated.coins).toBe(725);
+    expect(migrated.completedLevels).toEqual(['animals', 'food', 'sports']);
+    expect(migrated.soundEnabled).toBe(false);
+    expect(migrated.unlockedCategories).toEqual([
+      'animals', 'food', 'countries', 'sports',
+    ]);
+
+    const sportsIndex = CATEGORIES.findIndex((category) => category.id === 'sports');
+    const countriesIndex = CATEGORIES.findIndex((category) => category.id === 'countries');
+    expect(isCategoryUnlocked(sportsIndex, migrated.completedLevels, migrated.unlockedCategories)).toBe(true);
+    expect(isCategoryUnlocked(countriesIndex, migrated.completedLevels, migrated.unlockedCategories)).toBe(true);
+  });
+
+  it('assigns all approved tiers and stable target/grid/time settings', () => {
+    const expectedTiers = {
+      animals: 'beginner',
+      colors: 'beginner',
+      fruits: 'beginner',
+      clothing: 'easy',
+      food: 'easy',
+      music: 'easy',
+      space: 'easy',
+      'ocean-life': 'intermediate',
+      vegetables: 'intermediate',
+      nature: 'intermediate',
+      countries: 'advanced',
+      movies: 'advanced',
+      sports: 'advanced',
+      technology: 'advanced',
+      jobs: 'advanced',
+    };
+    expect(CATEGORY_DIFFICULTY).toEqual(expectedTiers);
+    const plans = Object.fromEntries(
+      CATEGORIES.map((category) => [category.id, getCategoryPuzzlePlan(category)]),
+    );
+    expect(plans.animals).toMatchObject({ gridSize: 8, targetWords: CATEGORIES[0].words, timeLimitSeconds: 150, diagonalWordCount: 0 });
+    expect(plans.colors).toMatchObject({ gridSize: 8, targetWords: CATEGORIES.find((category) => category.id === 'colors')!.words.slice(0, 8), timeLimitSeconds: 150, diagonalWordCount: 0 });
+    expect(plans.clothing).toMatchObject({ gridSize: 10, targetWords: CATEGORIES.find((category) => category.id === 'clothing')!.words.slice(0, 10), timeLimitSeconds: 180, diagonalWordCount: 2 });
+    expect(plans.ocean-life).toMatchObject({ gridSize: 10, targetWords: CATEGORIES.find((category) => category.id === 'ocean-life')!.words, timeLimitSeconds: 210, diagonalWordCount: 4 });
+    expect(plans.countries).toMatchObject({ gridSize: 12, targetWords: CATEGORIES.find((category) => category.id === 'countries')!.words, timeLimitSeconds: 240, diagonalWordCount: 5 });
+    expect(plans.jobs).toMatchObject({ gridSize: 12, targetWords: CATEGORIES.find((category) => category.id === 'jobs')!.words, timeLimitSeconds: 210, diagonalWordCount: 4 });
+  });
+
+  it('generates each category plan reliably for 100 deterministic seeds', () => {
+    const failures: string[] = [];
+    for (const category of CATEGORIES) {
+      const plan = getCategoryPuzzlePlan(category);
+      for (let seed = 1; seed <= 100; seed += 1) {
+        try {
+          const puzzle = generatePuzzle(plan.targetWords, seededRandom(seed), {
+            gridSize: plan.gridSize,
+            diagonalWordCount: plan.diagonalWordCount,
+          });
+          expect(puzzle.size, `category=${category.id} seed=${seed} grid`).toBe(plan.gridSize);
+          expect(puzzle.words, `category=${category.id} seed=${seed} targets`).toEqual(plan.targetWords);
+          expect(puzzle.placements, `category=${category.id} seed=${seed} placements`).toHaveLength(plan.targetWords.length);
+          const diagonalCount = puzzle.placements.filter(({ cells }) =>
+            Math.abs(cells[1].row - cells[0].row) === 1 &&
+            Math.abs(cells[1].col - cells[0].col) === 1,
+          ).length;
+          expect(diagonalCount, `category=${category.id} seed=${seed} diagonal count`).toBe(plan.diagonalWordCount);
+          for (const placement of puzzle.placements) {
+            const forward = selectionWord(puzzle.grid, placement.cells);
+            const reverse = selectionWord(puzzle.grid, [...placement.cells].reverse());
+            expect(matchPuzzleWord(forward ?? '', plan.targetWords), `category=${category.id} seed=${seed} forward ${placement.word}`).toBe(placement.word);
+            expect(matchPuzzleWord(reverse ?? '', plan.targetWords), `category=${category.id} seed=${seed} reverse ${placement.word}`).toBe(placement.word);
+            expect(placement.cells.every(({ row, col }) =>
+              row >= 0 && col >= 0 && row < puzzle.size && col < puzzle.size,
+            ), `category=${category.id} seed=${seed} bounds ${placement.word}`).toBe(true);
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          failures.push(`category=${category.id} seed=${seed}: ${reason}`);
+        }
+      }
+    }
+    expect(failures, failures.join('\n')).toEqual([]);
   });
 
   it('ships playable, normalized word lists and generates every category board', () => {

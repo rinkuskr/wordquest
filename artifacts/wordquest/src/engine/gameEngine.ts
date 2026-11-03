@@ -10,9 +10,20 @@ const DIRECTIONS: readonly Position[] = [
   { row: 1, col: 0 },
   { row: 1, col: 1 },
 ];
+const AXIS_DIRECTIONS: readonly Position[] = DIRECTIONS.filter(
+  ({ row, col }) => row === 0 || col === 0,
+);
+const DIAGONAL_DIRECTIONS: readonly Position[] = DIRECTIONS.filter(
+  ({ row, col }) => row !== 0 && col !== 0,
+);
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const MAX_PLACEMENT_ATTEMPTS = 500;
 const MAX_LAYOUT_ATTEMPTS = 25;
+
+export interface PuzzleGenerationOptions {
+  gridSize?: 8 | 10 | 12;
+  diagonalWordCount?: number;
+}
 
 export function getGridSize(words: readonly string[]): 8 | 10 | 12 {
   const normalized = words.map((word) => word.trim().toUpperCase());
@@ -36,6 +47,7 @@ export function seededRandom(seed: number): () => number {
 export function generatePuzzle(
   inputWords: readonly string[],
   random: () => number = Math.random,
+  options: PuzzleGenerationOptions = {},
 ): Puzzle {
   const words = inputWords.map((word) => word.trim().toUpperCase());
   if (!words.length) throw new Error('Cannot generate a puzzle without words.');
@@ -46,12 +58,24 @@ export function generatePuzzle(
     throw new Error('Puzzle word list contains duplicates.');
   }
 
-  const size = getGridSize(words);
+  const size = options.gridSize ?? getGridSize(words);
+  const requestedDiagonalCount = options.diagonalWordCount;
+  if (
+    requestedDiagonalCount !== undefined &&
+    (!Number.isInteger(requestedDiagonalCount) ||
+      requestedDiagonalCount < 0 ||
+      requestedDiagonalCount > words.length)
+  ) {
+    throw new Error(`Diagonal word count must be an integer between 0 and ${words.length}.`);
+  }
   const orderedWords = [...words].sort((a, b) => b.length - a.length);
   if (orderedWords.some((word) => word.length > size)) {
     const word = orderedWords.find((candidate) => candidate.length > size)!;
     throw new Error(`"${word}" is longer than the ${size}×${size} puzzle grid.`);
   }
+  const diagonalWords = requestedDiagonalCount === undefined
+    ? null
+    : new Set(orderedWords.slice(orderedWords.length - requestedDiagonalCount));
 
   let grid: string[][] | null = null;
   let placements: Placement[] | null = null;
@@ -61,10 +85,22 @@ export function generatePuzzle(
     const candidatePlacements: Placement[] = [];
     let failed = false;
 
-    for (const word of orderedWords) {
+    const layoutWordOrder = diagonalWords === null
+      ? orderedWords
+      : [
+          ...orderedWords.filter((word) => diagonalWords.has(word)),
+          ...orderedWords.filter((word) => !diagonalWords.has(word)),
+        ];
+
+    for (const word of layoutWordOrder) {
       let placed: Placement | null = null;
+        const directions = diagonalWords === null
+          ? DIRECTIONS
+          : diagonalWords.has(word)
+            ? DIAGONAL_DIRECTIONS
+            : AXIS_DIRECTIONS;
       for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS && !placed; attempt += 1) {
-        const direction = DIRECTIONS[Math.floor(random() * DIRECTIONS.length)];
+          const direction = directions[Math.floor(random() * directions.length)];
         const row = Math.floor(random() * size);
         const col = Math.floor(random() * size);
         const cells = Array.from({ length: word.length }, (_, index) => ({
@@ -102,8 +138,11 @@ export function generatePuzzle(
   }
 
   if (!grid || !placements) {
+    const distributionMessage = requestedDiagonalCount === undefined
+      ? ''
+      : ` while placing exactly ${requestedDiagonalCount} diagonal word(s)`;
     throw new Error(
-      `Could not place "${lastFailedWord}" after ${MAX_LAYOUT_ATTEMPTS} complete layout attempts.`,
+      `Could not place "${lastFailedWord}"${distributionMessage} after ${MAX_LAYOUT_ATTEMPTS} complete layout attempts.`,
     );
   }
 
@@ -240,8 +279,12 @@ export function consumeHint(hintsLeft: number, hasAvailableWords: boolean) {
   return { hintsLeft: hintsLeft - 1, consumed: true };
 }
 
-export function isTimeExpired(mode: 'classic' | 'time', elapsedSeconds: number) {
-  return mode === 'time' && elapsedSeconds >= 120;
+export function isTimeExpired(
+  mode: 'classic' | 'time',
+  elapsedSeconds: number,
+  timeLimitSeconds = 120,
+) {
+  return mode === 'time' && elapsedSeconds >= timeLimitSeconds;
 }
 
 export function getTimeBonus(mode: 'classic' | 'time', remainingSeconds: number) {

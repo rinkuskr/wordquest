@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { IconButton, PageHeader, PrimaryButton } from '@/src/components/ui';
 import { getCategory } from '@/src/data/categories';
+import { getCategoryPuzzlePlan } from '@/src/data/difficulty';
 import { useGame } from '@/src/game/GameProvider';
 import type { GameMode } from '@/src/types/game';
 
@@ -14,17 +15,20 @@ export default function ModeSelectScreen() {
   const router = useRouter();
   const { selectedCategoryId, startGame, error, ready } = useGame();
   const category = getCategory(selectedCategoryId);
+  const plan = category ? getCategoryPuzzlePlan(category) : null;
   const [mode, setMode] = useState<GameMode>('classic');
   const canPlay = ready && !!category?.words.length;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-      <PageHeader title="Pick your pace" subtitle={category?.name ?? 'Choose a game mode'} onBack={() => router.back()} right={<IconButton icon="help-circle" accessibilityLabel="How to play" onPress={() => Alert.alert('How to play', 'Choose a mode, then drag across adjacent letters in a straight horizontal, vertical, or diagonal line. Find every listed word to complete the puzzle.')} />} />
+      <PageHeader title="Pick your pace" subtitle={category ? `${category.name} · ${plan?.tier}` : 'Choose a game mode'} onBack={() => router.back()} right={<IconButton icon="help-circle" accessibilityLabel="How to play" onPress={() => Alert.alert('How to play', 'Choose a mode, then drag across adjacent letters in a straight horizontal, vertical, or diagonal line. Find every listed word to complete the puzzle.')} />} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={[styles.categoryBanner, { backgroundColor: colors.navy }]}>
           <Text style={styles.categoryEmoji}>{category?.emoji ?? '🔎'}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={styles.bannerEyebrow}>YOUR NEXT PUZZLE</Text>
+            <Text style={styles.bannerEyebrow}>
+              {plan ? `${plan.tier.toUpperCase()} · YOUR NEXT PUZZLE` : 'YOUR NEXT PUZZLE'}
+            </Text>
             <Text style={styles.bannerTitle}>{category?.name ?? 'Word search'}</Text>
           </View>
           <Feather name="grid" size={20} color="#bdc8e8" />
@@ -46,13 +50,21 @@ export default function ModeSelectScreen() {
           title="Time Mode"
           subtitle="Race the clock for a bigger score."
           icon="clock"
-          detail="2 minutes"
+          detail={plan ? formatTimeLimit(plan.timeLimitSeconds) : '--:--'}
           accent="#fff0dc"
           accentColor={colors.orange}
           onPress={() => setMode('time')}
         />
 
         <View style={[styles.rules, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {plan && (
+            <View style={styles.ruleRow}>
+              <Feather name="grid" size={17} color={colors.primary} />
+              <Text style={[styles.ruleText, { color: colors.foreground }]}>
+                {plan.targetWords.length} target words · {plan.gridSize}×{plan.gridSize} grid
+              </Text>
+            </View>
+          )}
           <View style={styles.ruleRow}>
             <Feather name="target" size={17} color={colors.primary} />
             <Text style={[styles.ruleText, { color: colors.foreground }]}>10 points for each puzzle word</Text>
@@ -81,6 +93,10 @@ export default function ModeSelectScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function formatTimeLimit(seconds: number) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
 function ModeCard({

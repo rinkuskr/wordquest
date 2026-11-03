@@ -13,6 +13,7 @@ import { audioService } from '@/src/services/audio';
 import { adProvider } from '@/src/services/ads';
 import { BONUS_WORDS } from '@/src/data/bonusWords';
 import { CATEGORIES, getCategory } from '@/src/data/categories';
+import { getCategoryPuzzlePlan } from '@/src/data/difficulty';
 import { elapsedMilliseconds, monotonicNow } from '@/src/engine/gameClock';
 import { consumeHint, generatePuzzle, getTimeBonus, isTimeExpired, resolveWordSelection, scoreSelection, selectionWord } from '@/src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS } from '@/src/engine/progression';
@@ -32,6 +33,7 @@ export interface ActiveGame {
   categoryId: CategoryId;
   mode: GameMode;
   puzzle: Puzzle;
+  timeLimitSeconds: number;
   score: number;
   foundWords: string[];
   bonusWords: string[];
@@ -147,6 +149,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       return false;
     }
     try {
+      const plan = getCategoryPuzzlePlan(category);
       completionHandled.current = false;
       setSummary(null);
       setHintCells([]);
@@ -154,7 +157,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       const next: ActiveGame = {
         categoryId: category.id,
         mode,
-        puzzle: generatePuzzle(category.words),
+        puzzle: generatePuzzle(plan.targetWords, Math.random, {
+          gridSize: plan.gridSize,
+          diagonalWordCount: plan.diagonalWordCount,
+        }),
+        timeLimitSeconds: plan.timeLimitSeconds,
         score: 0,
         foundWords: [],
         bonusWords: [],
@@ -232,7 +239,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     );
     const elapsedSeconds = Math.floor(elapsedMs / 1000);
     const settled = { ...current, elapsedMs, elapsedSeconds, runningSince: null };
-    const remaining = Math.max(0, 120 - elapsedSeconds);
+    const remaining = Math.max(0, current.timeLimitSeconds - elapsedSeconds);
     const timeBonus = completed ? getTimeBonus(current.mode, remaining) : 0;
     const reward = completed
       ? awardFirstCompletion(progress, current.categoryId)
@@ -272,7 +279,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       monotonicNow(),
     );
     const elapsedSeconds = Math.floor(elapsedMs / 1000);
-    if (isTimeExpired(current.mode, elapsedSeconds)) {
+    if (isTimeExpired(current.mode, elapsedSeconds, current.timeLimitSeconds)) {
       finishGame({
         ...current,
         elapsedMs,
@@ -392,9 +399,9 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     const next = { ...current, elapsedSeconds };
     latestGame.current = next;
     setGame(next);
-    if (isTimeExpired(current.mode, elapsedSeconds)) finishGame(next, false);
+    if (isTimeExpired(current.mode, elapsedSeconds, current.timeLimitSeconds)) finishGame(next, false);
     else if (current.mode === 'time') {
-      const remaining = Math.max(0, 120 - elapsedSeconds);
+      const remaining = Math.max(0, current.timeLimitSeconds - elapsedSeconds);
       if (remaining < 30 && remaining > 0 && lastCountdownSecond.current !== remaining) {
         lastCountdownSecond.current = remaining;
         void audioService.play('countdown');

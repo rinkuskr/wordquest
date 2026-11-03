@@ -1,10 +1,10 @@
-import type { Category } from '@/src/types/game';
+import type { Category, CategoryId, DifficultyTier } from '@/src/types/game';
 
 /**
  * Offline puzzle vocabulary, reconstructed from the 15 category topics in the
  * supplied build spec. Puzzle processing uses uppercase A–Z words.
  */
-export const CATEGORIES: readonly Category[] = [
+const CATEGORY_DATA: readonly Category[] = [
   {
     id: 'animals', name: 'Animals', emoji: '🐾',
     words: ['CAT', 'DOG', 'LION', 'TIGER', 'ZEBRA', 'MONKEY', 'RABBIT', 'BEAR'],
@@ -67,6 +67,47 @@ export const CATEGORIES: readonly Category[] = [
   },
 ];
 
+export const CATEGORY_PROGRESSION_ORDER: readonly CategoryId[] = [
+  'animals',
+  'colors',
+  'fruits',
+  'clothing',
+  'food',
+  'music',
+  'space',
+  'ocean-life',
+  'vegetables',
+  'nature',
+  'countries',
+  'movies',
+  'sports',
+  'technology',
+  'jobs',
+];
+
+export const CATEGORY_DIFFICULTY: Record<CategoryId, DifficultyTier> = {
+  animals: 'beginner',
+  colors: 'beginner',
+  fruits: 'beginner',
+  clothing: 'easy',
+  food: 'easy',
+  music: 'easy',
+  space: 'easy',
+  'ocean-life': 'intermediate',
+  vegetables: 'intermediate',
+  nature: 'intermediate',
+  countries: 'advanced',
+  movies: 'advanced',
+  sports: 'advanced',
+  technology: 'advanced',
+  jobs: 'advanced',
+};
+
+const categoriesById = new Map(CATEGORY_DATA.map((category) => [category.id, category]));
+export const CATEGORIES: readonly Category[] = CATEGORY_PROGRESSION_ORDER.map(
+  (id) => categoriesById.get(id)!,
+);
+
 export const getCategory = (id: string | undefined) =>
   CATEGORIES.find((category) => category.id === id);
 
@@ -77,8 +118,15 @@ export const hasCompleteCategoryData = CATEGORIES.every(
 export function isCategoryUnlocked(
   categoryIndex: number,
   completedLevels: readonly string[],
+  previouslyUnlocked: readonly string[] = [],
 ): boolean {
-  if (categoryIndex <= 0) return true;
+  const current = CATEGORIES[categoryIndex];
+  if (!current) return false;
+  if (
+    categoryIndex === 0 ||
+    completedLevels.includes(current.id) ||
+    previouslyUnlocked.includes(current.id)
+  ) return true;
   const previous = CATEGORIES[categoryIndex - 1];
   return !!previous && completedLevels.includes(previous.id);
 }
