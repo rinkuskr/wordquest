@@ -2,12 +2,19 @@ export type AdState = 'disabled' | 'ready' | 'loading' | 'failed';
 export type AdResult = { state: AdState; rewarded: boolean };
 
 export type ConsentDebugGeography = 'DISABLED' | 'EEA' | 'OTHER' | 'REGULATED_US_STATE';
+export type AdsAgeRestrictedTreatment = 'CHILD' | 'TEEN' | 'UNSPECIFIED';
+export const DEFAULT_AGE_RESTRICTED_TREATMENT: AdsAgeRestrictedTreatment = 'UNSPECIFIED';
 
 export interface AdsInitializationOptions {
   /** UMP debug geography is only accepted in development builds. */
   debugGeography?: ConsentDebugGeography;
   /** Hashed test-device IDs reported by the Google Mobile Ads SDK. */
   testDeviceIdentifiers?: string[];
+  /**
+   * Treatment selected by an approved age-classification strategy.
+   * No age is inferred by the ads provider; omitted values retain UNSPECIFIED.
+   */
+  ageRestrictedTreatment?: AdsAgeRestrictedTreatment;
 }
 
 export interface AdsProvider {

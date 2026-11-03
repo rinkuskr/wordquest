@@ -4,11 +4,13 @@ import mobileAds, {
   AdsConsent,
   AdsConsentDebugGeography,
   AdsConsentPrivacyOptionsRequirementStatus,
+  AgeRestrictedTreatment,
   InterstitialAd,
   RewardedAd,
   RewardedAdEventType,
 } from 'react-native-google-mobile-ads';
 import {
+  DEFAULT_AGE_RESTRICTED_TREATMENT,
   INITIAL_INTERSTITIAL_SCHEDULE,
   INTERSTITIAL_STORAGE_KEY,
   markInterstitialShown,
@@ -17,6 +19,7 @@ import {
 } from './ads.core';
 import type {
   AdsInitializationOptions,
+  AdsAgeRestrictedTreatment,
   AdsProvider,
   AdResult,
   AdState,
@@ -27,6 +30,12 @@ export * from './ads.core';
 
 const REWARDED_AD_TIMEOUT_MS = 30_000;
 const INTERSTITIAL_RETRY_DELAY_MS = 30_000;
+
+const GOOGLE_AGE_TREATMENTS: Record<AdsAgeRestrictedTreatment, AgeRestrictedTreatment> = {
+  CHILD: AgeRestrictedTreatment.CHILD,
+  TEEN: AgeRestrictedTreatment.TEEN,
+  UNSPECIFIED: AgeRestrictedTreatment.UNSPECIFIED,
+};
 
 /**
  * Android-only Google Mobile Ads provider.
@@ -47,6 +56,7 @@ export class AndroidAdProvider implements AdsProvider {
   private interstitialRetry?: ReturnType<typeof setTimeout>;
   private lastInterstitialShownAt = 0;
   private rewardedRequestActive = false;
+  private ageRestrictedTreatment: AdsAgeRestrictedTreatment = DEFAULT_AGE_RESTRICTED_TREATMENT;
 
   get state(): AdState {
     return this.currentState;
@@ -66,6 +76,9 @@ export class AndroidAdProvider implements AdsProvider {
   async initialize(options?: AdsInitializationOptions): Promise<AdState> {
     if (this.initialized) return this.currentState;
     if (this.initialization) return this.initialization;
+    if (options?.ageRestrictedTreatment) {
+      this.ageRestrictedTreatment = options.ageRestrictedTreatment;
+    }
 
     this.setState('loading');
     this.initialization = this.initializeAfterConsent(options).finally(() => {
@@ -96,6 +109,11 @@ export class AndroidAdProvider implements AdsProvider {
           }
         : {};
 
+      const adsSdk = mobileAds();
+      await adsSdk.setRequestConfiguration({
+        ageRestrictedTreatment: GOOGLE_AGE_TREATMENTS[this.ageRestrictedTreatment],
+      });
+
       let canRequestAds: boolean;
       try {
         const consent = await AdsConsent.gatherConsent(consentOptions);
@@ -111,7 +129,7 @@ export class AndroidAdProvider implements AdsProvider {
         return this.currentState;
       }
 
-      await mobileAds().initialize();
+      await adsSdk.initialize();
       this.initialized = true;
       this.setState('ready');
       this.preloadInterstitial();
