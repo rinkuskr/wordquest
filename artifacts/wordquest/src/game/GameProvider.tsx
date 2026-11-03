@@ -14,7 +14,14 @@ import { adProvider } from '@/src/services/ads';
 import { BONUS_WORDS } from '@/src/data/bonusWords';
 import { getCategory } from '@/src/data/categories';
 import { getCategoryPuzzlePlan } from '@/src/data/difficulty';
-import { createDailyChallenge } from '@/src/engine/dailyChallenge';
+import {
+  createDailyChallenge,
+  DAILY_CHALLENGE_VERSION,
+  getDailyChallengeDefinition,
+  getUtcDateKey,
+  hasDailyCompletionForDate,
+  validateDailyRunSnapshot,
+} from '@/src/engine/dailyChallenge';
 import { elapsedMilliseconds, monotonicNow } from '@/src/engine/gameClock';
 import { consumeHint, generatePuzzle, getTimeBonus, isTimeExpired, resolveWordSelection, scoreSelection, selectionWord } from '@/src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS } from '@/src/engine/progression';
@@ -27,6 +34,15 @@ import {
   type DailyHistoryLoadResult,
 } from '@/src/services/dailyChallengePersistence';
 import {
+  archiveAndClearDailyRun,
+  clearDailyRun,
+  discardRecoveredDailyRun,
+  DAILY_RUN_APP_VERSION,
+  loadDailyRun,
+  saveDailyRun,
+  type DailyRunLoadResult,
+} from '@/src/services/dailyRunPersistence';
+import {
   acceptRecoveredProgress as acceptStoredProgressRecovery,
   loadProgress,
   saveProgress,
@@ -35,6 +51,7 @@ import {
 } from '@/src/services/persistence';
 import type {
   CategoryId,
+  DailyActiveRunSnapshot,
   DailyChallengeHistory,
   DailyChallengeRecord,
   GameMode,
@@ -49,6 +66,9 @@ type ProgressLoadStatus = 'loading' | 'ready' | 'read-error' | 'recovery-require
 type ProgressRecovery = Extract<ProgressLoadResult, { status: 'recovery-required' }>;
 type DailyLoadStatus = 'loading' | 'ready' | 'read-error' | 'recovery-required';
 type DailyRecovery = Extract<DailyHistoryLoadResult, { status: 'recovery-required' }>;
+type DailyRunLoadStatus = 'loading' | 'loaded' | 'ready' | 'read-error' | 'recovery-required';
+type DailyRunRecovery = Extract<DailyRunLoadResult, { status: 'recovery-required' }>;
+type DailyRunSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export interface ActiveGame {
   categoryId: CategoryId;
@@ -66,6 +86,32 @@ export interface ActiveGame {
   dailyChallengeDate?: string;
 }
 
+function createDailyRunSnapshot(current: ActiveGame): DailyActiveRunSnapshot | null {
+  if (!current.dailyChallengeDate) return null;
+  const definition = getDailyChallengeDefinition(current.dailyChallengeDate);
+  const elapsedMs = elapsedMilliseconds(
+    current.elapsedMs,
+    current.runningSince,
+    monotonicNow(),
+  );
+  return {
+    version: 1,
+    challengeVersion: DAILY_CHALLENGE_VERSION,
+    appVersion: DAILY_RUN_APP_VERSION,
+    dateKey: current.dailyChallengeDate,
+    categoryId: current.categoryId,
+    seed: definition.seed,
+    gridSize: current.puzzle.size,
+    timeLimitSeconds: current.timeLimitSeconds,
+    foundWords: [...current.foundWords],
+    bonusWords: [...current.bonusWords],
+    score: current.score,
+    hintsLeft: current.hintsLeft,
+    elapsedMs,
+    status: 'in-progress',
+  };
+}
+
 interface GameContextValue {
   progress: SavedProgress;
   ready: boolean;
@@ -77,6 +123,10 @@ interface GameContextValue {
   dailyRecovery: DailyRecovery | null;
   dailySaveError: string | null;
   dailySavePending: boolean;
+  dailyRunLoadStatus: DailyRunLoadStatus;
+  dailyRunRecovery: DailyRunRecovery | null;
+  dailyRunSaveError: string | null;
+  dailyRunSaveStatus: DailyRunSaveStatus;
   selectedCategoryId: CategoryId;
   game: ActiveGame | null;
   summary: GameSummary | null;
@@ -90,6 +140,10 @@ interface GameContextValue {
   acceptRecoveredDailyHistory: () => Promise<boolean>;
   startFreshDailyHistory: () => Promise<boolean>;
   retrySaveDailyChallenge: () => Promise<boolean>;
+  retryLoadDailyRun: () => Promise<boolean>;
+  discardCorruptDailyRun: () => Promise<boolean>;
+  retryDailyRunRecovery: () => Promise<boolean>;
+  retrySaveDailyRun: () => Promise<boolean>;
   selectCategory: (id: CategoryId) => void;
   startGame: (mode: GameMode) => boolean;
   startDailyChallenge: (dateKey: string) => boolean;
@@ -116,6 +170,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const [dailyRecovery, setDailyRecovery] = useState<DailyRecovery | null>(null);
   const [dailySaveError, setDailySaveError] = useState<string | null>(null);
   const [pendingDailyRecord, setPendingDailyRecord] = useState<DailyChallengeRecord | null>(null);
+  const [dailyRunLoadStatus, setDailyRunLoadStatus] = useState<DailyRunLoadStatus>('loading');
+  const [dailyRunRecovery, setDailyRunRecovery] = useState<DailyRunRecovery | null>(null);
+  const [dailyRunSaveError, setDailyRunSaveError] = useState<string | null>(null);
+  const [dailyRunSaveStatus, setDailyRunSaveStatus] = useState<DailyRunSaveStatus>('idle');
+  const [loadedDailyRun, setLoadedDailyRun] = useState<DailyActiveRunSnapshot | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<CategoryId>('animals');
   const [game, setGame] = useState<ActiveGame | null>(null);
   const [summary, setSummary] = useState<GameSummary | null>(null);
@@ -123,6 +182,8 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const [error, setError] = useState<string | null>(null);
   const latestGame = useRef<ActiveGame | null>(null);
   const completionHandled = useRef(false);
+  const dailyRunArchivePending = useRef(false);
+  const dailyRunRestoreAttempted = useRef<string | null>(null);
   const hintTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCountdownSecond = useRef<number | null>(null);
 
@@ -171,6 +232,105 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   useEffect(() => {
     void retryLoadDailyHistory();
   }, [retryLoadDailyHistory]);
+
+  const retryLoadDailyRun = useCallback(async () => {
+    setDailyRunLoadStatus('loading');
+    try {
+      const result = await loadDailyRun();
+      if (result.status === 'loaded') {
+        setLoadedDailyRun(result.snapshot);
+        setDailyRunRecovery(null);
+        setDailyRunLoadStatus('loaded');
+        return true;
+      }
+      setLoadedDailyRun(null);
+      setDailyRunLoadStatus(result.status);
+      setDailyRunRecovery(result.status === 'recovery-required' ? result : null);
+      return false;
+    } catch {
+      setLoadedDailyRun(null);
+      setDailyRunLoadStatus('read-error');
+      setDailyRunRecovery(null);
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    void retryLoadDailyRun();
+  }, [retryLoadDailyRun]);
+
+  const persistDailyRunSnapshot = useCallback(async (current: ActiveGame) => {
+    const snapshot = createDailyRunSnapshot(current);
+    if (!snapshot) return true;
+    setDailyRunSaveStatus((status) => status === 'saved' ? 'saved' : 'saving');
+    try {
+      await saveDailyRun(snapshot);
+      setDailyRunSaveStatus('saved');
+      setDailyRunSaveError(null);
+      return true;
+    } catch {
+      setDailyRunSaveStatus('error');
+      setDailyRunSaveError("This Daily Challenge couldn't be saved. Your current attempt is still playable; retry to protect it across restarts.");
+      return false;
+    }
+  }, []);
+
+  const retrySaveDailyRun = useCallback(async () => {
+    const current = latestGame.current;
+    if (current?.dailyChallengeDate && !current.ended) {
+      return persistDailyRunSnapshot(current);
+    }
+    if (!current?.dailyChallengeDate || pendingDailyRecord) return false;
+    try {
+      await clearDailyRun();
+      setLoadedDailyRun(null);
+      setDailyRunSaveError(null);
+      setDailyRunSaveStatus('saved');
+      return true;
+    } catch {
+      setDailyRunSaveStatus('error');
+      setDailyRunSaveError('The saved Daily Challenge attempt still could not be cleared. Retry when device storage is available.');
+      return false;
+    }
+  }, [pendingDailyRecord, persistDailyRunSnapshot]);
+
+  const discardCorruptDailyRun = useCallback(async () => {
+    if (!dailyRunRecovery?.backupSaved) return false;
+    try {
+      await discardRecoveredDailyRun();
+      setLoadedDailyRun(null);
+      setDailyRunRecovery(null);
+      setDailyRunLoadStatus('ready');
+      setDailyRunSaveError(null);
+      return true;
+    } catch {
+      setDailyRunRecovery((current) => current
+        ? { ...current, message: 'The damaged attempt could not be discarded. Its safety copy remains; retry when storage is available.' }
+        : current);
+      return false;
+    }
+  }, [dailyRunRecovery]);
+
+  const retryDailyRunRecovery = useCallback(async () => {
+    if (dailyRunArchivePending.current) {
+      const archived = await archiveAndClearDailyRun();
+      if (!archived) {
+        setDailyRunRecovery({
+          status: 'recovery-required',
+          backupSaved: false,
+          message: 'The outdated attempt could not be safely archived and cleared. Nothing was overwritten; retry recovery.',
+        });
+        return false;
+      }
+      dailyRunArchivePending.current = false;
+      setLoadedDailyRun(null);
+      setDailyRunRecovery(null);
+      setDailyRunLoadStatus('ready');
+      return true;
+    }
+    if (dailyRunRecovery?.backupSaved) return discardCorruptDailyRun();
+    return retryLoadDailyRun();
+  }, [dailyRunRecovery, discardCorruptDailyRun, retryLoadDailyRun]);
 
   useEffect(() => {
     if (ready) {
@@ -242,8 +402,8 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   }, [ready, selectedCategoryId]);
 
   const startDailyChallenge = useCallback((dateKey: string) => {
-    if (dailyLoadStatus !== 'ready') {
-      setError('Load or recover your daily challenge history before starting.');
+    if (dailyLoadStatus !== 'ready' || dailyRunLoadStatus !== 'ready') {
+      setError('Load or recover your saved Daily Challenge data before starting.');
       return false;
     }
     if (pendingDailyRecord?.dateKey === dateKey) {
@@ -275,12 +435,14 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       latestGame.current = next;
       lastCountdownSecond.current = null;
       setGame(next);
+      setLoadedDailyRun(null);
+      void persistDailyRunSnapshot(next);
       return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not create today’s challenge.');
       return false;
     }
-  }, [dailyLoadStatus, game, pendingDailyRecord]);
+  }, [dailyLoadStatus, dailyRunLoadStatus, game, pendingDailyRecord, persistDailyRunSnapshot]);
 
   const acceptRecoveredProgress = useCallback(async () => {
     if (!progressRecovery?.recoveredProgress || !progressRecovery.backupSaved) return false;
@@ -386,7 +548,19 @@ export function GameProvider({ children }: React.PropsWithChildren) {
 
   const retrySaveDailyChallenge = useCallback(async () => {
     if (!pendingDailyRecord) return false;
-    return saveDailyCompletion(pendingDailyRecord);
+    const saved = await saveDailyCompletion(pendingDailyRecord);
+    if (!saved) return false;
+    try {
+      await clearDailyRun();
+      setLoadedDailyRun(null);
+      setDailyRunSaveError(null);
+      setDailyRunSaveStatus('saved');
+      return true;
+    } catch {
+      setDailyRunSaveStatus('error');
+      setDailyRunSaveError("Today's result is saved, but the old attempt could not be cleared. It won't be restored over the completed result; retry the cleanup.");
+      return false;
+    }
   }, [pendingDailyRecord, saveDailyCompletion]);
 
   const finishGame = useCallback((current: ActiveGame, completed: boolean) => {
@@ -394,6 +568,9 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     completionHandled.current = true;
     const category = getCategory(current.categoryId);
     if (!category) return;
+    const dailyChallengeExpired = !!current.dailyChallengeDate &&
+      current.dailyChallengeDate !== getUtcDateKey(new Date());
+    const didComplete = completed && !dailyChallengeExpired;
     const elapsedMs = elapsedMilliseconds(
       current.elapsedMs,
       current.runningSince,
@@ -402,11 +579,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     const elapsedSeconds = Math.floor(elapsedMs / 1000);
     const settled = { ...current, elapsedMs, elapsedSeconds, runningSince: null };
     const remaining = Math.max(0, current.timeLimitSeconds - elapsedSeconds);
-    const timeBonus = completed ? getTimeBonus(current.mode, remaining) : 0;
+    const timeBonus = didComplete ? getTimeBonus(current.mode, remaining) : 0;
     const existingDailyRecord = current.dailyChallengeDate
       ? dailyHistory.records.find((record) => record.dateKey === current.dailyChallengeDate)
       : undefined;
-    const reward = completed && !current.dailyChallengeDate
+    const reward = didComplete && !current.dailyChallengeDate
       ? awardFirstCompletion(progress, current.categoryId)
       : { progress, reward: 0, isFirstCompletion: false };
     if (completed && reward.isFirstCompletion) setProgress(reward.progress);
@@ -423,36 +600,156 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       elapsedSeconds,
       timeBonus,
       earnedCoins: reward.reward,
-      completed,
+      completed: didComplete,
       newCategoryReward: reward.isFirstCompletion,
       ...(current.dailyChallengeDate
         ? {
             dailyChallenge: {
               dateKey: current.dailyChallengeDate,
-              isPersonalBest: completed && (!existingDailyRecord || finalScore > existingDailyRecord.bestScore),
+              isPersonalBest: didComplete && (!existingDailyRecord || finalScore > existingDailyRecord.bestScore),
               bestScore: Math.max(existingDailyRecord?.bestScore ?? 0, finalScore),
             },
           }
         : {}),
     };
     setSummary(result);
-    if (completed && current.dailyChallengeDate) {
-      void saveDailyCompletion({
-        dateKey: current.dailyChallengeDate,
-        categoryId: current.categoryId,
-        bestScore: finalScore,
-        completionTimeSeconds: elapsedSeconds,
-        wordsFound: current.foundWords.length,
-        totalWords: current.puzzle.words.length,
-      });
+    if (didComplete && current.dailyChallengeDate) {
+      void (async () => {
+        // Keep the final found-word state recoverable if writing the result fails.
+        await persistDailyRunSnapshot(settled);
+        const saved = await saveDailyCompletion({
+          dateKey: current.dailyChallengeDate!,
+          categoryId: current.categoryId,
+          bestScore: finalScore,
+          completionTimeSeconds: elapsedSeconds,
+          wordsFound: current.foundWords.length,
+          totalWords: current.puzzle.words.length,
+        });
+        if (!saved) return;
+        try {
+          await clearDailyRun();
+          setLoadedDailyRun(null);
+          setDailyRunSaveStatus('saved');
+          setDailyRunSaveError(null);
+        } catch {
+          setDailyRunSaveStatus('error');
+          setDailyRunSaveError("Today's result is saved, but the old attempt could not be cleared. It won't be restored over the completed result; retry the cleanup.");
+        }
+      })();
+    } else if (current.dailyChallengeDate) {
+      void (async () => {
+        const expiredSnapshot = {
+          ...settled,
+          elapsedMs: Math.max(elapsedMs, current.timeLimitSeconds * 1000),
+        };
+        await persistDailyRunSnapshot(expiredSnapshot);
+        try {
+          await clearDailyRun();
+          setLoadedDailyRun(null);
+          setDailyRunSaveError(null);
+        } catch {
+          setDailyRunSaveStatus('error');
+          setDailyRunSaveError("The expired Daily Challenge attempt couldn't be cleared. Retry the cleanup before starting again.");
+        }
+      })();
     }
     setHintCells([]);
-    void audioService.play(completed ? 'complete' : 'game-over');
+    void audioService.play(didComplete ? 'complete' : 'game-over');
     void Haptics.notificationAsync(
-      completed ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning,
+      didComplete ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning,
     ).catch(() => undefined);
     router.replace('/results');
-  }, [dailyHistory.records, progress, router, saveDailyCompletion]);
+  }, [dailyHistory.records, persistDailyRunSnapshot, progress, router, saveDailyCompletion]);
+
+  useEffect(() => {
+    if (dailyLoadStatus !== 'ready' || dailyRunLoadStatus !== 'loaded') return;
+    const today = getUtcDateKey(new Date());
+    const restoreKey = `${today}:${loadedDailyRun?.dateKey ?? 'none'}:${loadedDailyRun?.seed ?? ''}`;
+    if (dailyRunRestoreAttempted.current === restoreKey) return;
+    dailyRunRestoreAttempted.current = restoreKey;
+
+    if (!loadedDailyRun) {
+      setDailyRunLoadStatus('ready');
+      return;
+    }
+
+    const hasTodayCompletion = hasDailyCompletionForDate(dailyHistory.records, today);
+    if (hasTodayCompletion) {
+      setLoadedDailyRun(null);
+      setDailyRunLoadStatus('ready');
+      void clearDailyRun().catch(() => {
+        setDailyRunSaveStatus('error');
+        setDailyRunSaveError("Today's result is already saved, but the old attempt couldn't be cleared. It won't be restored over the completed result.");
+      });
+      return;
+    }
+
+    const validation = validateDailyRunSnapshot(
+      loadedDailyRun,
+      today,
+      DAILY_RUN_APP_VERSION,
+    );
+    if (validation.status !== 'valid') {
+      dailyRunArchivePending.current = true;
+      void archiveAndClearDailyRun().then((archived) => {
+        if (archived) {
+          dailyRunArchivePending.current = false;
+          setLoadedDailyRun(null);
+          setDailyRunRecovery(null);
+          setDailyRunLoadStatus('ready');
+          return;
+        }
+        setDailyRunRecovery({
+          status: 'recovery-required',
+          backupSaved: false,
+          message: validation.status === 'expired'
+            ? 'This Daily Challenge attempt has expired. Its data could not be safely archived yet; retry recovery before starting another challenge.'
+            : 'This saved Daily Challenge attempt is incompatible with the current puzzle configuration. Its data could not be safely archived yet; retry recovery.',
+        });
+        setDailyRunLoadStatus('recovery-required');
+      }).catch(() => {
+        setDailyRunRecovery({
+          status: 'recovery-required',
+          backupSaved: false,
+          message: 'The saved Daily Challenge attempt could not be safely archived. Nothing was overwritten; retry recovery.',
+        });
+        setDailyRunLoadStatus('recovery-required');
+      });
+      return;
+    }
+
+    const restored: ActiveGame = {
+      categoryId: validation.challenge.categoryId,
+      mode: 'time',
+      puzzle: validation.challenge.puzzle,
+      timeLimitSeconds: validation.challenge.timeLimitSeconds,
+      score: validation.score,
+      foundWords: validation.foundWords,
+      bonusWords: validation.bonusWords,
+      hintsLeft: validation.hintsLeft,
+      elapsedSeconds: Math.floor(validation.elapsedMs / 1000),
+      elapsedMs: validation.elapsedMs,
+      runningSince: null,
+      ended: false,
+      dailyChallengeDate: today,
+    };
+    completionHandled.current = false;
+    latestGame.current = restored;
+    setSummary(null);
+    setHintCells([]);
+    setGame(restored);
+    setDailyRunSaveStatus('saved');
+    setDailyRunSaveError(null);
+    setDailyRunLoadStatus('ready');
+
+    if (validation.isComplete) finishGame(restored, true);
+  }, [
+    dailyHistory.records,
+    dailyLoadStatus,
+    dailyRunLoadStatus,
+    finishGame,
+    loadedDailyRun,
+  ]);
 
   const recordSelection = useCallback((cells: Position[]) => {
     const current = latestGame.current;
@@ -492,6 +789,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       };
       latestGame.current = next;
       setGame(next);
+      if (next.dailyChallengeDate) void persistDailyRunSnapshot(next);
       void audioService.play('correct');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       if (next.foundWords.length === next.puzzle.words.length) finishGame(next, true);
@@ -505,13 +803,14 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       };
       latestGame.current = next;
       setGame(next);
+      if (next.dailyChallengeDate) void persistDailyRunSnapshot(next);
       void audioService.play('bonus');
       return 'bonus' as const;
     }
     if (resolution.kind === 'duplicate') return 'duplicate' as const;
     void audioService.play('wrong');
     return 'invalid' as const;
-  }, [finishGame]);
+  }, [finishGame, persistDailyRunSnapshot]);
 
   const showHint = useCallback(() => {
     const current = latestGame.current;
@@ -525,12 +824,13 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     const next = { ...current, hintsLeft: consumption.hintsLeft };
     latestGame.current = next;
     setGame(next);
+    if (next.dailyChallengeDate) void persistDailyRunSnapshot(next);
     setHintCells(chosen.cells);
     if (hintTimeout.current) clearTimeout(hintTimeout.current);
     hintTimeout.current = setTimeout(() => setHintCells([]), 1500);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     return true;
-  }, []);
+  }, [persistDailyRunSnapshot]);
 
   const requestRewardedHint = useCallback(async () => {
     const current = latestGame.current;
@@ -568,7 +868,8 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     const next = { ...current, elapsedMs, elapsedSeconds: Math.floor(elapsedMs / 1000), runningSince: null };
     latestGame.current = next;
     setGame(next);
-  }, []);
+    if (next.dailyChallengeDate) void persistDailyRunSnapshot(next);
+  }, [persistDailyRunSnapshot]);
 
   const syncClock = useCallback(() => {
     const current = latestGame.current;
@@ -583,6 +884,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     const next = { ...current, elapsedSeconds };
     latestGame.current = next;
     setGame(next);
+    if (next.dailyChallengeDate) void persistDailyRunSnapshot(next);
     if (isTimeExpired(current.mode, elapsedSeconds, current.timeLimitSeconds)) finishGame(next, false);
     else if (current.mode === 'time') {
       const remaining = Math.max(0, current.timeLimitSeconds - elapsedSeconds);
@@ -591,7 +893,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
         void audioService.play('countdown');
       }
     }
-  }, [finishGame]);
+  }, [finishGame, persistDailyRunSnapshot]);
 
   const toggleSound = useCallback(() => {
     setProgress((current) => ({ ...current, soundEnabled: !current.soundEnabled }));
@@ -615,6 +917,10 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     dailyRecovery,
     dailySaveError,
     dailySavePending: pendingDailyRecord !== null,
+    dailyRunLoadStatus,
+    dailyRunRecovery,
+    dailyRunSaveError,
+    dailyRunSaveStatus,
     selectedCategoryId,
     game,
     summary,
@@ -628,6 +934,10 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     acceptRecoveredDailyHistory,
     startFreshDailyHistory,
     retrySaveDailyChallenge,
+    retryLoadDailyRun,
+    discardCorruptDailyRun,
+    retryDailyRunRecovery,
+    retrySaveDailyRun,
     selectCategory,
     startGame,
     startDailyChallenge,
@@ -642,9 +952,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   }), [
     progress, ready, progressLoadStatus, progressRecovery, progressSaveError,
     dailyHistory, dailyLoadStatus, dailyRecovery, dailySaveError, pendingDailyRecord,
+    dailyRunLoadStatus, dailyRunRecovery, dailyRunSaveError, dailyRunSaveStatus,
     selectedCategoryId, game, summary, hintCells, error,
     retryLoadProgress, acceptRecoveredProgress, startFreshProgress, retrySaveProgress,
     retryLoadDailyHistory, acceptRecoveredDailyHistory, startFreshDailyHistory, retrySaveDailyChallenge,
+    retryLoadDailyRun, discardCorruptDailyRun, retryDailyRunRecovery, retrySaveDailyRun,
     selectCategory, startGame, startDailyChallenge, recordSelection, showHint, requestRewardedHint, resumeClock,
     pauseClock, syncClock, toggleSound, resetSummary,
   ]);

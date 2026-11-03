@@ -19,7 +19,19 @@ export default function GameScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { game, hintCells, showHint, requestRewardedHint, recordSelection, resumeClock, pauseClock, syncClock } = useGame();
+  const {
+    game,
+    hintCells,
+    showHint,
+    requestRewardedHint,
+    recordSelection,
+    resumeClock,
+    pauseClock,
+    syncClock,
+    dailyRunSaveError,
+    dailyRunSaveStatus,
+    retrySaveDailyRun,
+  } = useGame();
   const [notice, setNotice] = useState<string | null>(null);
   const adsState = useAdsState();
   const category = game ? getCategory(game.categoryId) : undefined;
@@ -108,6 +120,26 @@ export default function GameScreen() {
             Target diagonal count was not reached within the retry limit ({game.puzzle.placementDiagnostics.actualDiagonalCount}/{game.puzzle.placementDiagnostics.requestedDiagonalCount}); all words remain playable.
           </Text>
         )}
+      {game.dailyChallengeDate && dailyRunSaveStatus === 'saving' && (
+        <Text accessibilityLiveRegion="polite" style={[styles.saveStatus, { color: colors.mutedForeground }]}>
+          Saving progress…
+        </Text>
+      )}
+      {game.dailyChallengeDate && dailyRunSaveStatus === 'saved' && game.elapsedSeconds === 0 && !dailyRunSaveError && (
+        <Text accessibilityLiveRegion="polite" style={[styles.saveStatus, { color: colors.mutedForeground }]}>
+          Progress saved
+        </Text>
+      )}
+      {game.dailyChallengeDate && dailyRunSaveError && (
+        <View style={styles.saveError}>
+          <Text accessibilityLiveRegion="assertive" style={[styles.saveErrorText, { color: colors.orange }]}>
+            {dailyRunSaveError}
+          </Text>
+          <Pressable accessibilityRole="button" onPress={() => void retrySaveDailyRun()}>
+            <Text style={[styles.saveRetry, { color: colors.primary }]}>Retry save</Text>
+          </Pressable>
+        </View>
+      )}
 
       <View style={styles.playArea}>
         <View style={[styles.gridWrap, { width: boardSize }]}>
@@ -228,6 +260,10 @@ const styles = StyleSheet.create({
   wordFound: { textDecorationLine: 'line-through' },
   dragHint: { width: '100%', maxWidth: 520, alignSelf: 'center', textAlign: 'center', fontSize: 10, paddingTop: 8, paddingBottom: 3 },
   layoutNotice: { width: '100%', textAlign: 'center', fontSize: 10, fontWeight: '700', paddingTop: 6 },
+  saveStatus: { width: '100%', maxWidth: 520, alignSelf: 'center', textAlign: 'center', fontSize: 10, paddingBottom: 3 },
+  saveError: { width: '100%', maxWidth: 520, alignSelf: 'center', paddingVertical: 5, alignItems: 'center' },
+  saveErrorText: { fontSize: 10, textAlign: 'center', lineHeight: 15 },
+  saveRetry: { fontSize: 10, fontWeight: '800', paddingVertical: 4 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 38 },
   emptyIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   emptyTitle: { fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 19 },

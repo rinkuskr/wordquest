@@ -72,6 +72,23 @@ export interface DailyChallengeHistory {
   records: DailyChallengeRecord[];
 }
 
+export interface DailyActiveRunSnapshot {
+  version: 1;
+  challengeVersion: number;
+  appVersion: string;
+  dateKey: string;
+  categoryId: CategoryId;
+  seed: number;
+  gridSize: 8 | 10 | 12;
+  timeLimitSeconds: number;
+  foundWords: string[];
+  bonusWords: string[];
+  score: number;
+  hintsLeft: number;
+  elapsedMs: number;
+  status: 'in-progress';
+}
+
 export interface SavedProgress {
   version: 2;
   coins: number;

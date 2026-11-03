@@ -31,12 +31,18 @@ export default function HomeScreen() {
     dailyRecovery,
     dailySaveError,
     dailySavePending,
+    dailyRunLoadStatus,
+    dailyRunRecovery,
+    dailyRunSaveError,
     game,
     summary,
     retryLoadDailyHistory,
     acceptRecoveredDailyHistory,
     startFreshDailyHistory,
     retrySaveDailyChallenge,
+    retryLoadDailyRun,
+    retryDailyRunRecovery,
+    retrySaveDailyRun,
     startDailyChallenge,
     toggleSound,
   } = useGame();
@@ -172,6 +178,34 @@ export default function HomeScreen() {
               <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Retry loading history</Text>
             </Pressable>
           )}
+          {dailyRunLoadStatus === 'read-error' && (
+            <View style={styles.dailyRecovery}>
+              <Text style={[styles.dailyWarning, { color: colors.orange }]}>
+                The saved attempt could not be read. It has not been reset or overwritten.
+              </Text>
+              <Pressable onPress={() => void retryLoadDailyRun()} accessibilityRole="button">
+                <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Retry loading attempt</Text>
+              </Pressable>
+            </View>
+          )}
+          {dailyRunLoadStatus === 'recovery-required' && (
+            <View style={styles.dailyRecovery}>
+              <Text style={[styles.dailyWarning, { color: colors.orange }]}>{dailyRunRecovery?.message}</Text>
+              <Pressable onPress={() => void retryDailyRunRecovery()} accessibilityRole="button">
+                <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>
+                  {dailyRunRecovery?.backupSaved ? 'Discard saved attempt' : 'Retry safe recovery'}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+          {dailyRunSaveError && (
+            <View style={styles.dailyRecovery}>
+              <Text style={[styles.dailyWarning, { color: colors.orange }]}>{dailyRunSaveError}</Text>
+              <Pressable onPress={() => void retrySaveDailyRun()} accessibilityRole="button">
+                <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Retry saving attempt</Text>
+              </Pressable>
+            </View>
+          )}
           {dailySaveError && (
             <View style={styles.dailyRecovery}>
               <Text style={[styles.dailyWarning, { color: colors.orange }]}>{dailySaveError}</Text>
@@ -184,17 +218,19 @@ export default function HomeScreen() {
           <PrimaryButton
             title={dailySavePending
               ? 'Saving daily result'
-              : dailyLoadStatus === 'loading'
+              : dailyLoadStatus === 'loading' ||
+                dailyRunLoadStatus === 'loading' ||
+                dailyRunLoadStatus === 'loaded'
               ? 'Loading daily challenge'
-              : dailyLoadStatus !== 'ready'
-              ? 'Daily history unavailable'
+              : dailyLoadStatus !== 'ready' || dailyRunLoadStatus !== 'ready'
+              ? 'Daily challenge unavailable'
               : dailyInProgress
                 ? 'Continue challenge'
                 : dailyCompleted
                   ? 'Play today again'
                   : 'Start today’s challenge'}
             icon={dailyInProgress ? 'play' : dailyCompleted ? 'rotate-cw' : 'calendar'}
-            disabled={dailyLoadStatus !== 'ready' || dailySavePending}
+            disabled={dailyLoadStatus !== 'ready' || dailyRunLoadStatus !== 'ready' || dailySavePending}
             testID="daily-challenge-entry"
             onPress={() => {
               if (dailyInProgress) {

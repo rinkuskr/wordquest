@@ -18,7 +18,9 @@ export default function ResultsScreen() {
     summary,
     dailyHistory,
     dailySaveError,
+    dailyRunSaveError,
     retrySaveDailyChallenge,
+    retrySaveDailyRun,
     selectCategory,
     resetSummary,
   } = useGame();
@@ -119,8 +121,19 @@ export default function ResultsScreen() {
         {isDaily && dailySaveError && (
           <View style={[styles.saveWarning, { backgroundColor: '#fff7e8', borderColor: '#ffe7b5' }]}>
             <Text style={[styles.dailyResultText, { color: colors.foreground }]}>{dailySaveError}</Text>
+            {dailyRunSaveError && (
+              <Text style={[styles.dailyResultText, { color: colors.foreground }]}>{dailyRunSaveError}</Text>
+            )}
             <Pressable accessibilityRole="button" onPress={() => void retrySaveDailyChallenge()}>
               <Text style={[styles.retryText, { color: colors.primary }]}>Retry save</Text>
+            </Pressable>
+          </View>
+        )}
+        {isDaily && dailyRunSaveError && !dailySaveError && (
+          <View style={[styles.saveWarning, { backgroundColor: '#fff7e8', borderColor: '#ffe7b5' }]}>
+            <Text style={[styles.dailyResultText, { color: colors.foreground }]}>{dailyRunSaveError}</Text>
+            <Pressable accessibilityRole="button" onPress={() => void retrySaveDailyRun()}>
+              <Text style={[styles.retryText, { color: colors.primary }]}>Retry cleanup</Text>
             </Pressable>
           </View>
         )}
