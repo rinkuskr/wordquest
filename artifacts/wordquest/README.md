@@ -28,9 +28,10 @@ Progress is saved with AsyncStorage. The initial balance is 300 coins. The
 bonus-word set is bundled locally and is a curated vocabulary, not a complete
 English dictionary.
 
-AdMob is behind an optional service interface and is disabled until real App ID
-and ad-unit IDs are supplied and a compatible native Android build is configured.
-No production IDs are fabricated, and ads do not block gameplay or completion.
+Google's official test App ID and test ad-unit IDs are currently configured.
+Ad requests are gated by UMP consent, and production AdMob IDs have not been
+configured. Native ads require an Android EAS build; they cannot run in Expo Go
+or Expo Web.
 See `docs/ads-setup.md` before enabling ads.
 
 ## Android build status
