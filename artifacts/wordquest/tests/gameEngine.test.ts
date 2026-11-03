@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, statSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { BONUS_WORD_COUNT, BONUS_WORDS } from '../src/data/bonusWords';
 import { CATEGORIES, hasCompleteCategoryData, isCategoryUnlocked } from '../src/data/categories';
 import {
@@ -92,6 +93,177 @@ describe('grid size and generation', () => {
     }
 
     expect([...foundWords].sort()).toEqual([...animals.words].sort());
+  });
+
+  it('stress-tests every category over 500 reproducible seeds', () => {
+    const seedCount = 500;
+    const expectedDirections = new Set([
+      '-1,-1', '-1,0', '-1,1', '0,-1',
+      '0,1', '1,-1', '1,0', '1,1',
+    ]);
+    const failures: string[] = [];
+    const metrics: Array<{
+      categoryId: string;
+      generated: number;
+      generationErrors: number;
+      totalGenerationMs: number;
+      averageGenerationMs: number;
+      slowestPuzzleMs: number;
+    }> = [];
+    let totalGenerated = 0;
+
+    for (const category of CATEGORIES) {
+      let generated = 0;
+      let generationErrors = 0;
+      let totalGenerationMs = 0;
+      let slowestPuzzleMs = 0;
+      const directionsSeen = new Set<string>();
+
+      for (let seed = 1; seed <= seedCount; seed += 1) {
+        const startedAt = performance.now();
+        let puzzle;
+        try {
+          puzzle = generatePuzzle(category.words, seededRandom(seed));
+        } catch (error) {
+          totalGenerationMs += performance.now() - startedAt;
+          generationErrors += 1;
+          const reason = error instanceof Error ? error.message : String(error);
+          failures.push(`category=${category.id} seed=${seed}: generation failed: ${reason}`);
+          continue;
+        }
+        const generationTimeMs = performance.now() - startedAt;
+        totalGenerationMs += generationTimeMs;
+        slowestPuzzleMs = Math.max(slowestPuzzleMs, generationTimeMs);
+        generated += 1;
+        totalGenerated += 1;
+
+        const seedFailures: string[] = [];
+        const fail = (reason: string) => seedFailures.push(reason);
+
+        if (
+          puzzle.words.length !== category.words.length ||
+          category.words.some((word) => !puzzle.words.includes(word))
+        ) {
+          fail('generated target list differs from the category list');
+        }
+        if (
+          puzzle.placements.length !== category.words.length ||
+          new Set(puzzle.placements.map(({ word }) => word)).size !== category.words.length
+        ) {
+          fail('placements do not cover every target exactly once');
+        }
+        if (
+          puzzle.grid.length !== puzzle.size ||
+          puzzle.grid.some((row) => row.length !== puzzle.size)
+        ) {
+          fail(`grid is not square at size ${puzzle.size}`);
+        }
+
+        const cellsByCoordinate = new Map<string, string>();
+        const placedWords = new Set<string>();
+        for (const placement of puzzle.placements) {
+          if (!category.words.includes(placement.word)) {
+            fail(`unexpected placed word "${placement.word}"`);
+            continue;
+          }
+          if (placedWords.has(placement.word)) {
+            fail(`target "${placement.word}" was placed more than once`);
+            continue;
+          }
+          placedWords.add(placement.word);
+          if (placement.cells.length !== placement.word.length || placement.cells.length < 2) {
+            fail(`placement length is invalid for "${placement.word}"`);
+            continue;
+          }
+
+          let placementInBounds = true;
+          for (let index = 0; index < placement.cells.length; index += 1) {
+            const cell = placement.cells[index];
+            if (
+              cell.row < 0 ||
+              cell.col < 0 ||
+              cell.row >= puzzle.size ||
+              cell.col >= puzzle.size
+            ) {
+              placementInBounds = false;
+              break;
+            }
+            const letter = placement.word[index];
+            const coordinate = `${cell.row}:${cell.col}`;
+            const previousLetter = cellsByCoordinate.get(coordinate);
+            if (previousLetter && previousLetter !== letter) {
+              fail(`overlap at ${coordinate} conflicts: ${previousLetter} vs ${letter}`);
+            }
+            cellsByCoordinate.set(coordinate, letter);
+            if (puzzle.grid[cell.row]?.[cell.col] !== letter) {
+              fail(`grid letters do not spell "${placement.word}" at ${coordinate}`);
+            }
+          }
+          if (!placementInBounds) {
+            fail(`placement for "${placement.word}" is outside the grid`);
+            continue;
+          }
+
+          const first = placement.cells[0];
+          const second = placement.cells[1];
+          const rowStep = second.row - first.row;
+          const colStep = second.col - first.col;
+          directionsSeen.add(`${rowStep},${colStep}`);
+
+          const forward = selectionWord(puzzle.grid, placement.cells);
+          const reverse = selectionWord(puzzle.grid, [...placement.cells].reverse());
+          const unfoundTargets = category.words.filter((word) => !placedWords.has(word) || word === placement.word);
+          if (
+            forward !== placement.word ||
+            matchPuzzleWord(forward ?? '', unfoundTargets) !== placement.word
+          ) {
+            fail(`forward selection cannot find "${placement.word}"`);
+          }
+          if (
+            reverse !== [...placement.word].reverse().join('') ||
+            matchPuzzleWord(reverse ?? '', unfoundTargets) !== placement.word
+          ) {
+            fail(`reverse selection cannot find "${placement.word}"`);
+          }
+        }
+
+        for (const target of category.words) {
+          if (!placedWords.has(target)) fail(`target "${target}" has no valid placement`);
+        }
+
+        if (seedFailures.length) {
+          failures.push(
+            ...seedFailures.map((reason) => `category=${category.id} seed=${seed}: ${reason}`),
+          );
+        }
+      }
+
+      const missingDirections = [...expectedDirections].filter((direction) => !directionsSeen.has(direction));
+      if (missingDirections.length) {
+        failures.push(
+          `category=${category.id} seeds=1..${seedCount}: missing placement directions ${missingDirections.join(' ')}`,
+        );
+      }
+      metrics.push({
+        categoryId: category.id,
+        generated,
+        generationErrors,
+        totalGenerationMs: Number(totalGenerationMs.toFixed(2)),
+        averageGenerationMs: Number((totalGenerationMs / seedCount).toFixed(4)),
+        slowestPuzzleMs: Number(slowestPuzzleMs.toFixed(3)),
+      });
+    }
+
+    console.info(
+      `WORDQUEST_PUZZLE_STRESS ${JSON.stringify({
+        categories: CATEGORIES.length,
+        seedsPerCategory: seedCount,
+        totalGenerated,
+        failures: failures.length,
+        metrics,
+      })}`,
+    );
+    expect(failures, failures.join('\n')).toEqual([]);
   });
 });
 
