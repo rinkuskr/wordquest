@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -20,6 +20,8 @@ const tiles = [
   ['Q', 'U', 'E', 'S'],
   ['T', 'A', 'L', 'V'],
 ];
+
+const PRIVACY_POLICY_URL = 'https://sites.google.com/view/wordquestapp/home';
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -61,6 +63,14 @@ export default function HomeScreen() {
     const opened = await adProvider.showPrivacyOptionsForm();
     if (!opened) {
       Alert.alert('Privacy options', 'No privacy options are currently required for this device.');
+    }
+  };
+
+  const openPrivacyPolicy = async () => {
+    try {
+      await Linking.openURL(PRIVACY_POLICY_URL);
+    } catch {
+      Alert.alert('Privacy Policy', 'The Privacy Policy could not be opened. Please try again later.');
     }
   };
 
@@ -337,6 +347,16 @@ export default function HomeScreen() {
             Age and ads · {ageBandLabel(ageSettings.classification?.ageBand ?? null)}
           </Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel="Privacy Policy"
+          testID="privacy-policy-link"
+          onPress={() => void openPrivacyPolicy()}
+          style={({ pressed }) => [styles.privacyLink, { opacity: pressed ? 0.65 : 1 }]}
+        >
+          <Feather name="external-link" size={13} color={colors.primary} />
+          <Text style={[styles.privacyText, styles.privacyPolicyText, { color: colors.primary }]}>Privacy Policy</Text>
+        </Pressable>
       </ScrollView>
       <AdBannerSlot />
     </SafeAreaView>
@@ -397,4 +417,5 @@ const styles = StyleSheet.create({
   secondaryText: { fontSize: 13, fontWeight: '700' },
   privacyLink: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: 6, paddingVertical: 9 },
   privacyText: { fontSize: 10, fontWeight: '700' },
+  privacyPolicyText: { fontSize: 11, fontWeight: '800' },
 });

@@ -13,6 +13,7 @@
     "android": {
       "package": "com.wordquest.puzzle",
       "versionCode": 1,
+      "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#17285b"
