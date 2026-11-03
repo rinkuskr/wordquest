@@ -51,6 +51,25 @@ export interface GameSummary {
   earnedCoins: number;
   completed: boolean;
   newCategoryReward: boolean;
+  dailyChallenge?: {
+    dateKey: string;
+    isPersonalBest: boolean;
+    bestScore: number;
+  };
+}
+
+export interface DailyChallengeRecord {
+  dateKey: string;
+  categoryId: CategoryId;
+  bestScore: number;
+  completionTimeSeconds: number;
+  wordsFound: number;
+  totalWords: number;
+}
+
+export interface DailyChallengeHistory {
+  version: 1;
+  records: DailyChallengeRecord[];
 }
 
 export interface SavedProgress {

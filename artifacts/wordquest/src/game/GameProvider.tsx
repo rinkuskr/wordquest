@@ -14,9 +14,18 @@ import { adProvider } from '@/src/services/ads';
 import { BONUS_WORDS } from '@/src/data/bonusWords';
 import { getCategory } from '@/src/data/categories';
 import { getCategoryPuzzlePlan } from '@/src/data/difficulty';
+import { createDailyChallenge } from '@/src/engine/dailyChallenge';
 import { elapsedMilliseconds, monotonicNow } from '@/src/engine/gameClock';
 import { consumeHint, generatePuzzle, getTimeBonus, isTimeExpired, resolveWordSelection, scoreSelection, selectionWord } from '@/src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS } from '@/src/engine/progression';
+import {
+  acceptRecoveredDailyHistory as acceptStoredDailyHistoryRecovery,
+  loadDailyHistory,
+  recordDailyCompletion,
+  startFreshDailyHistory as startFreshStoredDailyHistory,
+  INITIAL_DAILY_HISTORY,
+  type DailyHistoryLoadResult,
+} from '@/src/services/dailyChallengePersistence';
 import {
   acceptRecoveredProgress as acceptStoredProgressRecovery,
   loadProgress,
@@ -24,10 +33,22 @@ import {
   startFreshProgress as startFreshStoredProgress,
   type ProgressLoadResult,
 } from '@/src/services/persistence';
-import type { CategoryId, GameMode, GameSummary, Placement, Position, Puzzle, SavedProgress } from '@/src/types/game';
+import type {
+  CategoryId,
+  DailyChallengeHistory,
+  DailyChallengeRecord,
+  GameMode,
+  GameSummary,
+  Placement,
+  Position,
+  Puzzle,
+  SavedProgress,
+} from '@/src/types/game';
 
 type ProgressLoadStatus = 'loading' | 'ready' | 'read-error' | 'recovery-required';
 type ProgressRecovery = Extract<ProgressLoadResult, { status: 'recovery-required' }>;
+type DailyLoadStatus = 'loading' | 'ready' | 'read-error' | 'recovery-required';
+type DailyRecovery = Extract<DailyHistoryLoadResult, { status: 'recovery-required' }>;
 
 export interface ActiveGame {
   categoryId: CategoryId;
@@ -42,6 +63,7 @@ export interface ActiveGame {
   elapsedMs: number;
   runningSince: number | null;
   ended: boolean;
+  dailyChallengeDate?: string;
 }
 
 interface GameContextValue {
@@ -50,6 +72,11 @@ interface GameContextValue {
   progressLoadStatus: ProgressLoadStatus;
   progressRecovery: ProgressRecovery | null;
   progressSaveError: string | null;
+  dailyHistory: DailyChallengeHistory;
+  dailyLoadStatus: DailyLoadStatus;
+  dailyRecovery: DailyRecovery | null;
+  dailySaveError: string | null;
+  dailySavePending: boolean;
   selectedCategoryId: CategoryId;
   game: ActiveGame | null;
   summary: GameSummary | null;
@@ -59,8 +86,13 @@ interface GameContextValue {
   acceptRecoveredProgress: () => Promise<boolean>;
   startFreshProgress: () => Promise<boolean>;
   retrySaveProgress: () => Promise<boolean>;
+  retryLoadDailyHistory: () => Promise<void>;
+  acceptRecoveredDailyHistory: () => Promise<boolean>;
+  startFreshDailyHistory: () => Promise<boolean>;
+  retrySaveDailyChallenge: () => Promise<boolean>;
   selectCategory: (id: CategoryId) => void;
   startGame: (mode: GameMode) => boolean;
+  startDailyChallenge: (dateKey: string) => boolean;
   recordSelection: (cells: Position[]) => 'puzzle' | 'bonus' | 'invalid' | 'duplicate';
   showHint: () => boolean;
   requestRewardedHint: () => Promise<boolean>;
@@ -79,6 +111,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const [progressLoadStatus, setProgressLoadStatus] = useState<ProgressLoadStatus>('loading');
   const [progressRecovery, setProgressRecovery] = useState<ProgressRecovery | null>(null);
   const [progressSaveError, setProgressSaveError] = useState<string | null>(null);
+  const [dailyHistory, setDailyHistory] = useState<DailyChallengeHistory>(INITIAL_DAILY_HISTORY);
+  const [dailyLoadStatus, setDailyLoadStatus] = useState<DailyLoadStatus>('loading');
+  const [dailyRecovery, setDailyRecovery] = useState<DailyRecovery | null>(null);
+  const [dailySaveError, setDailySaveError] = useState<string | null>(null);
+  const [pendingDailyRecord, setPendingDailyRecord] = useState<DailyChallengeRecord | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<CategoryId>('animals');
   const [game, setGame] = useState<ActiveGame | null>(null);
   const [summary, setSummary] = useState<GameSummary | null>(null);
@@ -112,6 +149,28 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   useEffect(() => {
     void retryLoadProgress();
   }, [retryLoadProgress]);
+
+  const retryLoadDailyHistory = useCallback(async () => {
+    setDailyLoadStatus('loading');
+    try {
+      const result = await loadDailyHistory();
+      if (result.status === 'loaded') {
+        setDailyHistory(result.history);
+        setDailyLoadStatus('ready');
+        setDailyRecovery(null);
+        return;
+      }
+      setDailyLoadStatus(result.status);
+      setDailyRecovery(result.status === 'recovery-required' ? result : null);
+    } catch {
+      setDailyLoadStatus('read-error');
+      setDailyRecovery(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void retryLoadDailyHistory();
+  }, [retryLoadDailyHistory]);
 
   useEffect(() => {
     if (ready) {
@@ -182,6 +241,47 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     }
   }, [ready, selectedCategoryId]);
 
+  const startDailyChallenge = useCallback((dateKey: string) => {
+    if (dailyLoadStatus !== 'ready') {
+      setError('Load or recover your daily challenge history before starting.');
+      return false;
+    }
+    if (pendingDailyRecord?.dateKey === dateKey) {
+      setError('Save the previous daily result before starting another attempt.');
+      return false;
+    }
+    if (game?.dailyChallengeDate === dateKey && !game.ended) return true;
+    try {
+      const challenge = createDailyChallenge(dateKey);
+      completionHandled.current = false;
+      setSummary(null);
+      setHintCells([]);
+      setError(null);
+      const next: ActiveGame = {
+        categoryId: challenge.categoryId,
+        mode: 'time',
+        puzzle: challenge.puzzle,
+        timeLimitSeconds: challenge.timeLimitSeconds,
+        score: 0,
+        foundWords: [],
+        bonusWords: [],
+        hintsLeft: 3,
+        elapsedSeconds: 0,
+        elapsedMs: 0,
+        runningSince: null,
+        ended: false,
+        dailyChallengeDate: challenge.dateKey,
+      };
+      latestGame.current = next;
+      lastCountdownSecond.current = null;
+      setGame(next);
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not create today’s challenge.');
+      return false;
+    }
+  }, [dailyLoadStatus, game, pendingDailyRecord]);
+
   const acceptRecoveredProgress = useCallback(async () => {
     if (!progressRecovery?.recoveredProgress || !progressRecovery.backupSaved) return false;
     try {
@@ -228,6 +328,67 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     }
   }, [progress, ready]);
 
+  const acceptRecoveredDailyHistory = useCallback(async () => {
+    if (!dailyRecovery?.backupSaved || !dailyRecovery.recoveredHistory) return false;
+    try {
+      const history = await acceptStoredDailyHistoryRecovery();
+      setDailyHistory(history);
+      setDailyRecovery(null);
+      setDailyLoadStatus('ready');
+      return true;
+    } catch {
+      setDailyRecovery((current) => current
+        ? { ...current, message: 'Recovered daily history could not be saved. The preserved original data is unchanged; retry recovery.' }
+        : current);
+      return false;
+    }
+  }, [dailyRecovery]);
+
+  const startFreshDailyHistory = useCallback(async () => {
+    if (!dailyRecovery?.backupSaved) return false;
+    try {
+      const history = await startFreshStoredDailyHistory();
+      setDailyHistory(history);
+      setDailyRecovery(null);
+      setDailyLoadStatus('ready');
+      return true;
+    } catch {
+      setDailyRecovery((current) => current
+        ? { ...current, message: 'New daily history could not be saved. The preserved original data is unchanged; retry when storage is available.' }
+        : current);
+      return false;
+    }
+  }, [dailyRecovery]);
+
+  const saveDailyCompletion = useCallback(async (record: DailyChallengeRecord) => {
+    setPendingDailyRecord(record);
+    try {
+      const result = await recordDailyCompletion(record);
+      setDailyHistory(result.history);
+      setDailySaveError(null);
+      setPendingDailyRecord(null);
+      setSummary((current) => current?.dailyChallenge?.dateKey === record.dateKey
+        ? {
+            ...current,
+            dailyChallenge: {
+              dateKey: record.dateKey,
+              isPersonalBest: result.isPersonalBest,
+              bestScore: result.record.bestScore,
+            },
+          }
+        : current);
+      return true;
+    } catch {
+      setDailySaveError("Today's result couldn't be saved. Your result remains on this screen; retry to save it.");
+      return false;
+    }
+  }, []);
+
+  const retrySaveDailyChallenge = useCallback(async () => {
+    if (!pendingDailyRecord) return false;
+    return saveDailyCompletion(pendingDailyRecord);
+  }, [pendingDailyRecord, saveDailyCompletion]);
+
   const finishGame = useCallback((current: ActiveGame, completed: boolean) => {
     if (completionHandled.current) return;
     completionHandled.current = true;
@@ -242,7 +403,10 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     const settled = { ...current, elapsedMs, elapsedSeconds, runningSince: null };
     const remaining = Math.max(0, current.timeLimitSeconds - elapsedSeconds);
     const timeBonus = completed ? getTimeBonus(current.mode, remaining) : 0;
-    const reward = completed
+    const existingDailyRecord = current.dailyChallengeDate
+      ? dailyHistory.records.find((record) => record.dateKey === current.dailyChallengeDate)
+      : undefined;
+    const reward = completed && !current.dailyChallengeDate
       ? awardFirstCompletion(progress, current.categoryId)
       : { progress, reward: 0, isFirstCompletion: false };
     if (completed && reward.isFirstCompletion) setProgress(reward.progress);
@@ -261,15 +425,34 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       earnedCoins: reward.reward,
       completed,
       newCategoryReward: reward.isFirstCompletion,
+      ...(current.dailyChallengeDate
+        ? {
+            dailyChallenge: {
+              dateKey: current.dailyChallengeDate,
+              isPersonalBest: completed && (!existingDailyRecord || finalScore > existingDailyRecord.bestScore),
+              bestScore: Math.max(existingDailyRecord?.bestScore ?? 0, finalScore),
+            },
+          }
+        : {}),
     };
     setSummary(result);
+    if (completed && current.dailyChallengeDate) {
+      void saveDailyCompletion({
+        dateKey: current.dailyChallengeDate,
+        categoryId: current.categoryId,
+        bestScore: finalScore,
+        completionTimeSeconds: elapsedSeconds,
+        wordsFound: current.foundWords.length,
+        totalWords: current.puzzle.words.length,
+      });
+    }
     setHintCells([]);
     void audioService.play(completed ? 'complete' : 'game-over');
     void Haptics.notificationAsync(
       completed ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning,
     ).catch(() => undefined);
     router.replace('/results');
-  }, [progress, router]);
+  }, [dailyHistory.records, progress, router, saveDailyCompletion]);
 
   const recordSelection = useCallback((cells: Position[]) => {
     const current = latestGame.current;
@@ -351,7 +534,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
 
   const requestRewardedHint = useCallback(async () => {
     const current = latestGame.current;
-    if (!current || current.ended) return false;
+    if (!current || current.ended || current.dailyChallengeDate) return false;
     try {
       const result = await adProvider.showRewarded();
       if (!result.rewarded) return false;
@@ -427,6 +610,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     progressLoadStatus,
     progressRecovery,
     progressSaveError,
+    dailyHistory,
+    dailyLoadStatus,
+    dailyRecovery,
+    dailySaveError,
+    dailySavePending: pendingDailyRecord !== null,
     selectedCategoryId,
     game,
     summary,
@@ -436,8 +624,13 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     acceptRecoveredProgress,
     startFreshProgress,
     retrySaveProgress,
+    retryLoadDailyHistory,
+    acceptRecoveredDailyHistory,
+    startFreshDailyHistory,
+    retrySaveDailyChallenge,
     selectCategory,
     startGame,
+    startDailyChallenge,
     recordSelection,
     showHint,
     requestRewardedHint,
@@ -448,9 +641,11 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     resetSummary,
   }), [
     progress, ready, progressLoadStatus, progressRecovery, progressSaveError,
+    dailyHistory, dailyLoadStatus, dailyRecovery, dailySaveError, pendingDailyRecord,
     selectedCategoryId, game, summary, hintCells, error,
     retryLoadProgress, acceptRecoveredProgress, startFreshProgress, retrySaveProgress,
-    selectCategory, startGame, recordSelection, showHint, requestRewardedHint, resumeClock,
+    retryLoadDailyHistory, acceptRecoveredDailyHistory, startFreshDailyHistory, retrySaveDailyChallenge,
+    selectCategory, startGame, startDailyChallenge, recordSelection, showHint, requestRewardedHint, resumeClock,
     pauseClock, syncClock, toggleSound, resetSummary,
   ]);
 

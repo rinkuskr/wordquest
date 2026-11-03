@@ -75,7 +75,9 @@ export default function GameScreen() {
         <View style={styles.categoryHeading}>
           <Text style={[styles.categoryName, { color: colors.foreground }]}>{category.emoji} {category.name}</Text>
           <Text style={[styles.modeCaption, { color: colors.mutedForeground }]}>
-            {`${plan.tier.toUpperCase()} · ${game.mode === 'classic' ? 'CLASSIC MODE' : 'TIME MODE'}`}
+            {game.dailyChallengeDate
+              ? 'DAILY CHALLENGE · TIME MODE'
+              : `${plan.tier.toUpperCase()} · ${game.mode === 'classic' ? 'CLASSIC MODE' : 'TIME MODE'}`}
           </Text>
         </View>
         <View style={[styles.scorePill, { backgroundColor: '#fff0dc' }]}>
@@ -146,7 +148,7 @@ export default function GameScreen() {
             <View style={styles.hintBadge}><Text style={styles.hintCount}>{game.hintsLeft}</Text></View>
           </Pressable>
         </View>
-        {game.hintsLeft === 0 && adsState === 'ready' && (
+        {!game.dailyChallengeDate && game.hintsLeft === 0 && adsState === 'ready' && (
           <Pressable
             accessibilityRole="button"
             onPress={async () => {

@@ -1,2 +1,3 @@
 - [WordQuest monetization](wordquest-monetization.md) — free Android game funded by AdMob; development must use Google test IDs and complete required UMP consent gating.
 - [Puzzle direction placement](wordquest-puzzle-directions.md) — diagonal counts are targets; preserve all words and expose diagnostics when a layout needs fewer diagonals.
+- [WordQuest daily challenge](wordquest-daily-challenge.md) — one deterministic UTC puzzle per day, with local history and no daily ads or rewards.

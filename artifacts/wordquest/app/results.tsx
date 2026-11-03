@@ -2,28 +2,49 @@ import React, { useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { PrimaryButton } from '@/src/components/ui';
 import { CATEGORIES } from '@/src/data/categories';
 import { useGame } from '@/src/game/GameProvider';
 import { adProvider } from '@/src/services/ads';
+import { dailyRecordToSummary } from '@/src/engine/dailyChallenge';
 
 export default function ResultsScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { summary, selectCategory, resetSummary } = useGame();
+  const params = useLocalSearchParams<{ dailyDate?: string }>();
+  const {
+    summary,
+    dailyHistory,
+    dailySaveError,
+    retrySaveDailyChallenge,
+    selectCategory,
+    resetSummary,
+  } = useGame();
   const completionTransitionHandled = useRef(false);
-  const currentIndex = summary ? CATEGORIES.findIndex((item) => item.id === summary.categoryId) : -1;
+  const dailyDate = typeof params.dailyDate === 'string' ? params.dailyDate : null;
+  const restoredDailyRecord = dailyDate
+    ? dailyHistory.records.find((record) => record.dateKey === dailyDate)
+    : undefined;
+  const displaySummary = dailyDate
+    ? summary?.dailyChallenge?.dateKey === dailyDate
+      ? summary
+      : restoredDailyRecord
+        ? dailyRecordToSummary(restoredDailyRecord)
+        : null
+    : summary;
+  const isDaily = !!displaySummary?.dailyChallenge;
+  const currentIndex = displaySummary ? CATEGORIES.findIndex((item) => item.id === displaySummary.categoryId) : -1;
   const nextCategory = CATEGORIES[currentIndex + 1];
 
   const recordCompletedTransition = () => {
-    if (!summary?.completed || completionTransitionHandled.current) return;
+    if (!displaySummary?.completed || isDaily || completionTransitionHandled.current) return;
     completionTransitionHandled.current = true;
     void adProvider.recordCompletedPuzzleTransition();
   };
 
-  if (!summary) {
+  if (!displaySummary) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
         <View style={styles.center}>
@@ -37,48 +58,78 @@ export default function ResultsScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <View style={styles.content}>
-        <View style={[styles.heroIcon, { backgroundColor: summary.completed ? '#fff0dc' : '#e5efff' }]}>
+        <View style={[styles.heroIcon, { backgroundColor: displaySummary.completed ? '#fff0dc' : '#e5efff' }]}>
           <Feather
-            name={summary.completed ? 'award' : 'rotate-cw'}
+            name={displaySummary.completed ? 'award' : 'rotate-cw'}
             size={35}
-            color={summary.completed ? colors.orange : colors.primary}
+            color={displaySummary.completed ? colors.orange : colors.primary}
           />
         </View>
         <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>
-          {summary.completed ? 'PUZZLE COMPLETE' : 'TIME IS UP'}
+          {isDaily
+            ? displaySummary.completed ? 'DAILY CHALLENGE COMPLETE' : 'DAILY CHALLENGE · TIME IS UP'
+            : displaySummary.completed ? 'PUZZLE COMPLETE' : 'TIME IS UP'}
         </Text>
         <Text style={[styles.title, { color: colors.foreground }]}>
-          {summary.completed ? 'Nicely done.' : 'Good effort.'}
+          {isDaily && displaySummary.completed
+            ? 'Daily Challenge completed'
+            : displaySummary.completed ? 'Nicely done.' : 'Good effort.'}
         </Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          {summary.categoryName} · {summary.wordsFound} of {summary.totalWords} words found
+          {displaySummary.categoryName} · {displaySummary.wordsFound} of {displaySummary.totalWords} words found
         </Text>
 
         <View style={[styles.scoreCard, { backgroundColor: colors.navy }]}>
           <Text style={styles.scoreLabel}>FINAL SCORE</Text>
-          <Text style={styles.score}>{summary.score}</Text>
+          <Text style={styles.score}>{displaySummary.score}</Text>
           <View style={styles.scoreDivider} />
           <View style={styles.scoreDetails}>
             <View style={styles.scoreDetail}>
-              <Text style={styles.detailNumber}>{summary.bonusWords}</Text>
-              <Text style={styles.detailLabel}>BONUS WORDS</Text>
+              <Text style={styles.detailNumber}>{isDaily ? displaySummary.wordsFound : displaySummary.bonusWords}</Text>
+              <Text style={styles.detailLabel}>{isDaily ? 'WORDS FOUND' : 'BONUS WORDS'}</Text>
             </View>
             <View style={styles.scoreDetail}>
-              <Text style={styles.detailNumber}>{formatDuration(summary.elapsedSeconds)}</Text>
-              <Text style={styles.detailLabel}>TIME</Text>
+              <Text style={styles.detailNumber}>{formatDuration(displaySummary.elapsedSeconds)}</Text>
+              <Text style={styles.detailLabel}>{isDaily ? 'TIME TAKEN' : 'TIME'}</Text>
             </View>
             <View style={styles.scoreDetail}>
-              <Text style={styles.detailNumber}>+{summary.timeBonus}</Text>
-              <Text style={styles.detailLabel}>TIME BONUS</Text>
+              <Text style={styles.detailNumber}>
+                {isDaily ? displaySummary.dailyChallenge?.dateKey : `+${displaySummary.timeBonus}`}
+              </Text>
+              <Text style={styles.detailLabel}>{isDaily ? 'UTC DATE' : 'TIME BONUS'}</Text>
             </View>
           </View>
         </View>
 
-        {summary.earnedCoins > 0 && (
+        {isDaily && displaySummary.completed && (
+          <View style={[styles.dailyResult, { backgroundColor: '#eaf7ef', borderColor: '#cdebd8' }]}>
+            <Feather
+              name={displaySummary.dailyChallenge?.isPersonalBest ? 'award' : 'check-circle'}
+              size={17}
+              color="#28a667"
+            />
+            <Text style={[styles.dailyResultText, { color: colors.foreground }]}>
+              {displaySummary.dailyChallenge?.isPersonalBest
+                ? 'Personal best!'
+                : `Personal best: ${displaySummary.dailyChallenge?.bestScore ?? 0}`}
+            </Text>
+          </View>
+        )}
+
+        {isDaily && dailySaveError && (
+          <View style={[styles.saveWarning, { backgroundColor: '#fff7e8', borderColor: '#ffe7b5' }]}>
+            <Text style={[styles.dailyResultText, { color: colors.foreground }]}>{dailySaveError}</Text>
+            <Pressable accessibilityRole="button" onPress={() => void retrySaveDailyChallenge()}>
+              <Text style={[styles.retryText, { color: colors.primary }]}>Retry save</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {!isDaily && displaySummary.earnedCoins > 0 && (
           <View style={[styles.reward, { backgroundColor: '#fff7e8', borderColor: '#ffe7b5' }]}>
             <Feather name="circle" size={17} color={colors.orange} />
             <Text style={[styles.rewardText, { color: colors.foreground }]}>
-              First chapter reward <Text style={{ fontWeight: '900' }}>+{summary.earnedCoins} coins</Text>
+              First chapter reward <Text style={{ fontWeight: '900' }}>+{displaySummary.earnedCoins} coins</Text>
             </Text>
             <Feather name="check-circle" size={17} color="#28a667" />
           </View>
@@ -86,17 +137,17 @@ export default function ResultsScreen() {
 
         <View style={styles.actions}>
           <PrimaryButton
-            title={summary.completed && nextCategory ? 'Next world' : 'Play again'}
-            icon={summary.completed && nextCategory ? 'arrow-right' : 'rotate-cw'}
+            title={isDaily ? 'Back home' : displaySummary.completed && nextCategory ? 'Next world' : 'Play again'}
+            icon={isDaily ? 'home' : displaySummary.completed && nextCategory ? 'arrow-right' : 'rotate-cw'}
             onPress={() => {
-              recordCompletedTransition();
-              if (summary.completed && nextCategory) selectCategory(nextCategory.id);
+              if (!isDaily) recordCompletedTransition();
+              if (!isDaily && displaySummary.completed && nextCategory) selectCategory(nextCategory.id);
               resetSummary();
-              router.replace('/modes');
+              router.replace(isDaily ? '/' : '/modes');
             }}
             style={styles.action}
           />
-          <Pressable
+          {!isDaily && <Pressable
             accessibilityRole="button"
             onPress={() => {
               recordCompletedTransition();
@@ -107,7 +158,7 @@ export default function ResultsScreen() {
           >
             <Feather name="home" size={17} color={colors.foreground} />
             <Text style={[styles.homeText, { color: colors.foreground }]}>Home</Text>
-          </Pressable>
+          </Pressable>}
         </View>
       </View>
     </SafeAreaView>
@@ -133,6 +184,10 @@ const styles = StyleSheet.create({
   scoreDetail: { flex: 1, alignItems: 'center' },
   detailNumber: { color: '#ffffff', fontSize: 15, fontWeight: '800' },
   detailLabel: { color: '#bfc9e5', fontSize: 8, fontWeight: '800', letterSpacing: 0.7, marginTop: 5 },
+  dailyResult: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 16, padding: 13, marginTop: 13 },
+  dailyResultText: { flex: 1, fontSize: 12, fontWeight: '700', lineHeight: 17 },
+  saveWarning: { width: '100%', borderWidth: 1, borderRadius: 16, padding: 13, marginTop: 13, gap: 8 },
+  retryText: { fontSize: 12, fontWeight: '900' },
   reward: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 16, padding: 13, marginTop: 13 },
   rewardText: { flex: 1, fontSize: 12, fontWeight: '600' },
   actions: { width: '100%', marginTop: 20 },

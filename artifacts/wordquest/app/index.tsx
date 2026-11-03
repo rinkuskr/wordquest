@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -7,8 +7,11 @@ import { useColors } from '@/hooks/useColors';
 import { CoinPill, IconButton, PrimaryButton } from '@/src/components/ui';
 import AdBannerSlot from '@/src/components/AdBannerSlot';
 import { useGame } from '@/src/game/GameProvider';
+import { getCategory } from '@/src/data/categories';
 import { adProvider } from '@/src/services/ads';
 import { audioService } from '@/src/services/audio';
+import { getDailyChallengeDefinition } from '@/src/engine/dailyChallenge';
+import { useUtcDateKey } from '@/src/hooks/useUtcDateKey';
 
 const tiles = [
   ['W', 'O', 'R', 'D'],
@@ -19,7 +22,30 @@ const tiles = [
 export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { progress, ready, progressLoadStatus, toggleSound } = useGame();
+  const {
+    progress,
+    ready,
+    progressLoadStatus,
+    dailyHistory,
+    dailyLoadStatus,
+    dailyRecovery,
+    dailySaveError,
+    dailySavePending,
+    game,
+    summary,
+    retryLoadDailyHistory,
+    acceptRecoveredDailyHistory,
+    startFreshDailyHistory,
+    retrySaveDailyChallenge,
+    startDailyChallenge,
+    toggleSound,
+  } = useGame();
+  const dateKey = useUtcDateKey();
+  const dailyDefinition = useMemo(() => getDailyChallengeDefinition(dateKey), [dateKey]);
+  const dailyRecord = dailyHistory.records.find((record) => record.dateKey === dateKey);
+  const dailyInProgress = game?.dailyChallengeDate === dateKey && !game.ended;
+  const dailyCompleted = !!dailyRecord ||
+    (summary?.completed === true && summary.dailyChallenge?.dateKey === dateKey);
 
   const openPrivacyOptions = async () => {
     const opened = await adProvider.showPrivacyOptionsForm();
@@ -93,6 +119,115 @@ export default function HomeScreen() {
           </View>
           <View style={[styles.boardOrb, { backgroundColor: colors.primary }]} />
         </View>
+
+        <View style={[styles.dailyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.dailyHeader}>
+            <View style={[styles.dailyIcon, { backgroundColor: '#fff0dc' }]}>
+              <Feather name="calendar" size={17} color={colors.orange} />
+            </View>
+            <View style={styles.dailyHeading}>
+              <Text style={[styles.dailyTitle, { color: colors.foreground }]}>Daily Challenge</Text>
+              <Text style={[styles.dailyDate, { color: colors.mutedForeground }]}>{dateKey} · UTC</Text>
+            </View>
+            <Text style={[styles.dailyTag, { color: colors.primary }]}>DAILY</Text>
+          </View>
+          <Text style={[styles.dailyCategory, { color: colors.foreground }]}>{dailyDefinition.categoryName}</Text>
+          <Text style={[styles.dailyCopy, { color: colors.mutedForeground }]}>
+            {dailySavePending
+              ? 'Saving your completed result…'
+              : dailyInProgress
+              ? 'Your challenge is in progress.'
+              : dailyCompleted
+                ? `Completed · best score ${dailyRecord?.bestScore ?? summary?.score ?? 0}`
+                : 'One shared, deterministic Time Mode puzzle for today.'}
+          </Text>
+
+          {dailyLoadStatus === 'read-error' && (
+            <Text style={[styles.dailyWarning, { color: colors.orange }]}>
+              Daily history could not load. It has not been reset.
+            </Text>
+          )}
+          {dailyLoadStatus === 'recovery-required' && (
+            <View style={styles.dailyRecovery}>
+              <Text style={[styles.dailyWarning, { color: colors.orange }]}>{dailyRecovery?.message}</Text>
+              {dailyRecovery?.backupSaved && dailyRecovery.recoveredHistory && (
+                <Pressable onPress={() => void acceptRecoveredDailyHistory()} accessibilityRole="button">
+                  <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Restore recoverable history</Text>
+                </Pressable>
+              )}
+              {dailyRecovery?.backupSaved && (
+                <Pressable onPress={() => void startFreshDailyHistory()} accessibilityRole="button">
+                  <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Start new daily history</Text>
+                </Pressable>
+              )}
+              {!dailyRecovery?.backupSaved && (
+                <Pressable onPress={() => void retryLoadDailyHistory()} accessibilityRole="button">
+                  <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Retry safe recovery</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+          {dailyLoadStatus === 'read-error' && (
+            <Pressable onPress={() => void retryLoadDailyHistory()} accessibilityRole="button">
+              <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Retry loading history</Text>
+            </Pressable>
+          )}
+          {dailySaveError && (
+            <View style={styles.dailyRecovery}>
+              <Text style={[styles.dailyWarning, { color: colors.orange }]}>{dailySaveError}</Text>
+              <Pressable onPress={() => void retrySaveDailyChallenge()} accessibilityRole="button">
+                <Text style={[styles.dailyRecoveryAction, { color: colors.primary }]}>Retry saving result</Text>
+              </Pressable>
+            </View>
+          )}
+
+          <PrimaryButton
+            title={dailySavePending
+              ? 'Saving daily result'
+              : dailyLoadStatus === 'loading'
+              ? 'Loading daily challenge'
+              : dailyLoadStatus !== 'ready'
+              ? 'Daily history unavailable'
+              : dailyInProgress
+                ? 'Continue challenge'
+                : dailyCompleted
+                  ? 'Play today again'
+                  : 'Start today’s challenge'}
+            icon={dailyInProgress ? 'play' : dailyCompleted ? 'rotate-cw' : 'calendar'}
+            disabled={dailyLoadStatus !== 'ready' || dailySavePending}
+            testID="daily-challenge-entry"
+            onPress={() => {
+              if (dailyInProgress) {
+                router.push('/game');
+                return;
+              }
+              if (startDailyChallenge(dateKey)) router.push('/game');
+            }}
+            style={styles.dailyButton}
+          />
+        </View>
+
+        {dailyHistory.records.length > 0 && (
+          <View style={styles.dailyHistory}>
+            <Text style={[styles.historyHeading, { color: colors.mutedForeground }]}>RECENT DAILY RESULTS</Text>
+            {dailyHistory.records.slice(0, 3).map((record) => {
+              const category = getCategory(record.categoryId)?.name ?? record.categoryId;
+              return (
+                <Pressable
+                  key={record.dateKey}
+                  accessibilityRole="button"
+                  testID={`daily-history-${record.dateKey}`}
+                  onPress={() => router.push(`/results?dailyDate=${record.dateKey}`)}
+                  style={[styles.historyRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                >
+                  <Text style={[styles.historyDate, { color: colors.foreground }]}>{record.dateKey}</Text>
+                  <Text style={[styles.historyCategory, { color: colors.mutedForeground }]}>{category} · {record.bestScore} pts</Text>
+                  <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
 
         <View style={styles.progressRow}>
           <View style={[styles.progressIcon, { backgroundColor: '#e3edff' }]}>
@@ -180,6 +315,24 @@ const styles = StyleSheet.create({
   boardBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, zIndex: 1 },
   boardBottomText: { fontSize: 13, fontWeight: '700', color: '#d3daf0' },
   boardOrb: { width: 110, height: 110, borderRadius: 55, position: 'absolute', right: -49, bottom: -57, opacity: 0.2 },
+  dailyCard: { borderWidth: 1, borderRadius: 22, padding: 16, marginTop: 19 },
+  dailyHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dailyIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  dailyHeading: { flex: 1 },
+  dailyTitle: { fontSize: 15, fontWeight: '900' },
+  dailyDate: { fontSize: 10, marginTop: 3 },
+  dailyTag: { fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  dailyCategory: { fontSize: 19, fontWeight: '900', marginTop: 14 },
+  dailyCopy: { fontSize: 11, lineHeight: 16, marginTop: 4 },
+  dailyButton: { marginTop: 13 },
+  dailyWarning: { fontSize: 11, lineHeight: 16, marginTop: 8 },
+  dailyRecovery: { gap: 7, marginTop: 5 },
+  dailyRecoveryAction: { fontSize: 11, fontWeight: '800', paddingVertical: 5 },
+  dailyHistory: { marginTop: 18, gap: 8 },
+  historyHeading: { fontSize: 9, fontWeight: '900', letterSpacing: 1.1, marginBottom: 1 },
+  historyRow: { minHeight: 48, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  historyDate: { fontSize: 11, fontWeight: '800' },
+  historyCategory: { flex: 1, fontSize: 10 },
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 23 },
   progressIcon: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   progressCopy: { flex: 1 },

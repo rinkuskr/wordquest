@@ -17,6 +17,11 @@ bonus-word checks, hints, scoring, sounds, and progress are local; gameplay does
 not call the API or require internet access. Animals is the first unlocked
 category. Completing a category unlocks the next and awards 50 coins once.
 
+Daily Challenge selects one category and puzzle deterministically from the UTC
+date and stores completion history locally. Because it works offline, local
+storage cannot verify trusted time; changing the device clock can change which
+daily date is presented.
+
 The attached specification provides category names and order but does not
 contain per-category word arrays. The bundled category vocabulary is therefore
 reconstructed from those topics; it is playable, but cannot be verified as an
