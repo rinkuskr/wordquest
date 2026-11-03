@@ -465,13 +465,14 @@ describe('hints, progression, and local data recovery', () => {
     expect(plans.animals).toMatchObject({ gridSize: 8, targetWords: CATEGORIES[0].words, timeLimitSeconds: 150, diagonalWordCount: 0 });
     expect(plans.colors).toMatchObject({ gridSize: 8, targetWords: CATEGORIES.find((category) => category.id === 'colors')!.words.slice(0, 8), timeLimitSeconds: 150, diagonalWordCount: 0 });
     expect(plans.clothing).toMatchObject({ gridSize: 10, targetWords: CATEGORIES.find((category) => category.id === 'clothing')!.words.slice(0, 10), timeLimitSeconds: 180, diagonalWordCount: 2 });
-    expect(plans.ocean-life).toMatchObject({ gridSize: 10, targetWords: CATEGORIES.find((category) => category.id === 'ocean-life')!.words, timeLimitSeconds: 210, diagonalWordCount: 4 });
+    expect(plans['ocean-life']).toMatchObject({ gridSize: 10, targetWords: CATEGORIES.find((category) => category.id === 'ocean-life')!.words, timeLimitSeconds: 210, diagonalWordCount: 4 });
     expect(plans.countries).toMatchObject({ gridSize: 12, targetWords: CATEGORIES.find((category) => category.id === 'countries')!.words, timeLimitSeconds: 240, diagonalWordCount: 5 });
     expect(plans.jobs).toMatchObject({ gridSize: 12, targetWords: CATEGORIES.find((category) => category.id === 'jobs')!.words, timeLimitSeconds: 210, diagonalWordCount: 4 });
   });
 
   it('generates each category plan reliably for 100 deterministic seeds', () => {
     const failures: string[] = [];
+    const reducedDiagonalLayouts: string[] = [];
     for (const category of CATEGORIES) {
       const plan = getCategoryPuzzlePlan(category);
       for (let seed = 1; seed <= 100; seed += 1) {
@@ -479,6 +480,7 @@ describe('hints, progression, and local data recovery', () => {
           const puzzle = generatePuzzle(plan.targetWords, seededRandom(seed), {
             gridSize: plan.gridSize,
             diagonalWordCount: plan.diagonalWordCount,
+            allowReducedDiagonalFallback: true,
           });
           expect(puzzle.size, `category=${category.id} seed=${seed} grid`).toBe(plan.gridSize);
           expect(puzzle.words, `category=${category.id} seed=${seed} targets`).toEqual(plan.targetWords);
@@ -487,7 +489,19 @@ describe('hints, progression, and local data recovery', () => {
             Math.abs(cells[1].row - cells[0].row) === 1 &&
             Math.abs(cells[1].col - cells[0].col) === 1,
           ).length;
-          expect(diagonalCount, `category=${category.id} seed=${seed} diagonal count`).toBe(plan.diagonalWordCount);
+          expect(diagonalCount, `category=${category.id} seed=${seed} diagonal diagnostic`).toBe(
+            puzzle.placementDiagnostics?.actualDiagonalCount,
+          );
+          expect(puzzle.placementDiagnostics?.requestedDiagonalCount, `category=${category.id} seed=${seed} requested diagonals`).toBe(plan.diagonalWordCount);
+          expect(puzzle.placementDiagnostics?.distributionSatisfied, `category=${category.id} seed=${seed} distribution status`).toBe(
+            diagonalCount === plan.diagonalWordCount,
+          );
+          expect(diagonalCount, `category=${category.id} seed=${seed} fallback cannot exceed target`).toBeLessThanOrEqual(plan.diagonalWordCount);
+          if (diagonalCount < plan.diagonalWordCount) {
+            reducedDiagonalLayouts.push(
+              `${category.id} seed=${seed}: ${diagonalCount}/${plan.diagonalWordCount} diagonal targets`,
+            );
+          }
           for (const placement of puzzle.placements) {
             const forward = selectionWord(puzzle.grid, placement.cells);
             const reverse = selectionWord(puzzle.grid, [...placement.cells].reverse());
@@ -503,6 +517,15 @@ describe('hints, progression, and local data recovery', () => {
         }
       }
     }
+    console.info(
+      `WORDQUEST_DIFFICULTY_SEEDS ${JSON.stringify({
+        categories: CATEGORIES.length,
+        seedsPerCategory: 100,
+        generated: CATEGORIES.length * 100 - failures.length,
+        failures: failures.length,
+        reducedDiagonalLayouts,
+      })}`,
+    );
     expect(failures, failures.join('\n')).toEqual([]);
   });
 

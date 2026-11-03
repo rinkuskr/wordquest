@@ -23,6 +23,7 @@ const MAX_LAYOUT_ATTEMPTS = 25;
 export interface PuzzleGenerationOptions {
   gridSize?: 8 | 10 | 12;
   diagonalWordCount?: number;
+  allowReducedDiagonalFallback?: boolean;
 }
 
 export function getGridSize(words: readonly string[]): 8 | 10 | 12 {
@@ -73,76 +74,85 @@ export function generatePuzzle(
     const word = orderedWords.find((candidate) => candidate.length > size)!;
     throw new Error(`"${word}" is longer than the ${size}×${size} puzzle grid.`);
   }
-  const diagonalWords = requestedDiagonalCount === undefined
-    ? null
-    : new Set(orderedWords.slice(orderedWords.length - requestedDiagonalCount));
 
   let grid: string[][] | null = null;
   let placements: Placement[] | null = null;
   let lastFailedWord = orderedWords[0];
-  for (let layoutAttempt = 0; layoutAttempt < MAX_LAYOUT_ATTEMPTS; layoutAttempt += 1) {
-    const candidateGrid = Array.from({ length: size }, () => Array<string>(size).fill(''));
-    const candidatePlacements: Placement[] = [];
-    let failed = false;
+  const diagonalTargets = requestedDiagonalCount === undefined
+    ? [undefined]
+    : options.allowReducedDiagonalFallback
+      ? Array.from({ length: requestedDiagonalCount + 1 }, (_, index) => requestedDiagonalCount - index)
+      : [requestedDiagonalCount];
 
-    const layoutWordOrder = diagonalWords === null
-      ? orderedWords
-      : [
-          ...orderedWords.filter((word) => diagonalWords.has(word)),
-          ...orderedWords.filter((word) => !diagonalWords.has(word)),
-        ];
+  for (const diagonalTarget of diagonalTargets) {
+    const diagonalWords = diagonalTarget === undefined
+      ? null
+      : new Set(orderedWords.slice(orderedWords.length - diagonalTarget));
+    for (let layoutAttempt = 0; layoutAttempt < MAX_LAYOUT_ATTEMPTS; layoutAttempt += 1) {
+      const candidateGrid = Array.from({ length: size }, () => Array<string>(size).fill(''));
+      const candidatePlacements: Placement[] = [];
+      let failed = false;
 
-    for (const word of layoutWordOrder) {
-      let placed: Placement | null = null;
+      const layoutWordOrder = diagonalWords === null
+        ? orderedWords
+        : [
+            ...orderedWords.filter((word) => diagonalWords.has(word)),
+            ...orderedWords.filter((word) => !diagonalWords.has(word)),
+          ];
+
+      for (const word of layoutWordOrder) {
+        let placed: Placement | null = null;
         const directions = diagonalWords === null
           ? DIRECTIONS
           : diagonalWords.has(word)
             ? DIAGONAL_DIRECTIONS
             : AXIS_DIRECTIONS;
-      for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS && !placed; attempt += 1) {
+        for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS && !placed; attempt += 1) {
           const direction = directions[Math.floor(random() * directions.length)];
-        const row = Math.floor(random() * size);
-        const col = Math.floor(random() * size);
-        const cells = Array.from({ length: word.length }, (_, index) => ({
-          row: row + direction.row * index,
-          col: col + direction.col * index,
-        }));
-        if (cells.some(({ row: r, col: c }) => r < 0 || c < 0 || r >= size || c >= size)) {
-          continue;
+          const row = Math.floor(random() * size);
+          const col = Math.floor(random() * size);
+          const cells = Array.from({ length: word.length }, (_, index) => ({
+            row: row + direction.row * index,
+            col: col + direction.col * index,
+          }));
+          if (cells.some(({ row: r, col: c }) => r < 0 || c < 0 || r >= size || c >= size)) {
+            continue;
+          }
+          if (cells.some(({ row: r, col: c }, index) => {
+            const existing = candidateGrid[r][c];
+            return existing !== '' && existing !== word[index];
+          })) {
+            continue;
+          }
+          cells.forEach(({ row: r, col: c }, index) => {
+            candidateGrid[r][c] = word[index];
+          });
+          placed = { word, cells };
         }
-        if (cells.some(({ row: r, col: c }, index) => {
-          const existing = candidateGrid[r][c];
-          return existing !== '' && existing !== word[index];
-        })) {
-          continue;
+
+        if (!placed) {
+          lastFailedWord = word;
+          failed = true;
+          break;
         }
-        cells.forEach(({ row: r, col: c }, index) => {
-          candidateGrid[r][c] = word[index];
-        });
-        placed = { word, cells };
+        candidatePlacements.push(placed);
       }
 
-      if (!placed) {
-        lastFailedWord = word;
-        failed = true;
+      if (!failed) {
+        grid = candidateGrid;
+        placements = candidatePlacements;
         break;
       }
-      candidatePlacements.push(placed);
     }
-
-    if (!failed) {
-      grid = candidateGrid;
-      placements = candidatePlacements;
-      break;
-    }
+    if (grid && placements) break;
   }
 
   if (!grid || !placements) {
     const distributionMessage = requestedDiagonalCount === undefined
       ? ''
-      : ` while placing exactly ${requestedDiagonalCount} diagonal word(s)`;
+      : ` while targeting ${requestedDiagonalCount} diagonal word(s)`;
     throw new Error(
-      `Could not place "${lastFailedWord}"${distributionMessage} after ${MAX_LAYOUT_ATTEMPTS} complete layout attempts.`,
+      `Could not place "${lastFailedWord}"${distributionMessage}; tried ${diagonalTargets.length * MAX_LAYOUT_ATTEMPTS} complete layout attempts.`,
     );
   }
 
@@ -153,8 +163,26 @@ export function generatePuzzle(
       }
     }
   }
-  validatePuzzle({ size, grid, words, placements });
-  return { size, grid, words, placements };
+  const actualDiagonalCount = placements.filter(({ cells }) =>
+    Math.abs(cells[1].row - cells[0].row) === 1 &&
+    Math.abs(cells[1].col - cells[0].col) === 1,
+  ).length;
+  const placementDiagnostics = requestedDiagonalCount === undefined
+    ? undefined
+    : {
+        requestedDiagonalCount,
+        actualDiagonalCount,
+        distributionSatisfied: actualDiagonalCount === requestedDiagonalCount,
+      };
+  const puzzle = {
+    size,
+    grid,
+    words,
+    placements,
+    ...(placementDiagnostics ? { placementDiagnostics } : {}),
+  };
+  validatePuzzle(puzzle);
+  return puzzle;
 }
 
 export function validatePuzzle(puzzle: Puzzle): void {

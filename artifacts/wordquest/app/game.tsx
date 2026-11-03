@@ -100,6 +100,12 @@ export default function GameScreen() {
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${game.puzzle.words.length ? (game.foundWords.length / game.puzzle.words.length) * 100 : 0}%` }]} />
       </View>
+      {game.puzzle.placementDiagnostics &&
+        !game.puzzle.placementDiagnostics.distributionSatisfied && (
+          <Text style={[styles.layoutNotice, { color: colors.orange }]}>
+            Layout adjusted to keep all words playable ({game.puzzle.placementDiagnostics.actualDiagonalCount} of {game.puzzle.placementDiagnostics.requestedDiagonalCount} diagonal targets).
+          </Text>
+        )}
 
       <View style={styles.playArea}>
         <View style={[styles.gridWrap, { width: boardSize }]}>
@@ -219,6 +225,7 @@ const styles = StyleSheet.create({
   wordText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
   wordFound: { textDecorationLine: 'line-through' },
   dragHint: { width: '100%', maxWidth: 520, alignSelf: 'center', textAlign: 'center', fontSize: 10, paddingTop: 8, paddingBottom: 3 },
+  layoutNotice: { width: '100%', textAlign: 'center', fontSize: 10, fontWeight: '700', paddingTop: 6 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 38 },
   emptyIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   emptyTitle: { fontSize: 22, fontWeight: '900', textAlign: 'center', marginTop: 19 },

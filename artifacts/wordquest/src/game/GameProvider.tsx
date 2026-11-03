@@ -12,7 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { audioService } from '@/src/services/audio';
 import { adProvider } from '@/src/services/ads';
 import { BONUS_WORDS } from '@/src/data/bonusWords';
-import { CATEGORIES, getCategory } from '@/src/data/categories';
+import { getCategory } from '@/src/data/categories';
 import { getCategoryPuzzlePlan } from '@/src/data/difficulty';
 import { elapsedMilliseconds, monotonicNow } from '@/src/engine/gameClock';
 import { consumeHint, generatePuzzle, getTimeBonus, isTimeExpired, resolveWordSelection, scoreSelection, selectionWord } from '@/src/engine/gameEngine';
@@ -160,6 +160,7 @@ export function GameProvider({ children }: React.PropsWithChildren) {
         puzzle: generatePuzzle(plan.targetWords, Math.random, {
           gridSize: plan.gridSize,
           diagonalWordCount: plan.diagonalWordCount,
+          allowReducedDiagonalFallback: true,
         }),
         timeLimitSeconds: plan.timeLimitSeconds,
         score: 0,

@@ -31,6 +31,11 @@ export interface Puzzle {
   grid: string[][];
   words: string[];
   placements: Placement[];
+  placementDiagnostics?: {
+    requestedDiagonalCount: number;
+    actualDiagonalCount: number;
+    distributionSatisfied: boolean;
+  };
 }
 
 export interface GameSummary {
