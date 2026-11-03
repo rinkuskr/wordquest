@@ -12,6 +12,8 @@ import { adProvider } from '@/src/services/ads';
 import { audioService } from '@/src/services/audio';
 import { getDailyChallengeDefinition } from '@/src/engine/dailyChallenge';
 import { useUtcDateKey } from '@/src/hooks/useUtcDateKey';
+import { useAgeClassification } from '@/src/age/AgeClassificationProvider';
+import { ageBandLabel } from '@/src/services/ageClassification';
 
 const tiles = [
   ['W', 'O', 'R', 'D'],
@@ -47,6 +49,7 @@ export default function HomeScreen() {
     toggleSound,
   } = useGame();
   const dateKey = useUtcDateKey();
+  const ageSettings = useAgeClassification();
   const dailyDefinition = useMemo(() => getDailyChallengeDefinition(dateKey), [dateKey]);
   const dailyRecord = dailyHistory.records.find((record) => record.dateKey === dateKey);
   const dailyInProgress = game?.dailyChallengeDate === dateKey && !game.ended;
@@ -54,6 +57,7 @@ export default function HomeScreen() {
     (summary?.completed === true && summary.dailyChallenge?.dateKey === dateKey);
 
   const openPrivacyOptions = async () => {
+    if (!ageSettings.canOpenAdsPrivacyOptions) return;
     const opened = await adProvider.showPrivacyOptionsForm();
     if (!opened) {
       Alert.alert('Privacy options', 'No privacy options are currently required for this device.');
@@ -308,17 +312,31 @@ export default function HomeScreen() {
           <Feather name="arrow-right" size={15} color={colors.mutedForeground} />
         </Pressable>
         {Platform.OS === 'android' && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Privacy options"
-            testID="privacy-options"
-            onPress={() => void openPrivacyOptions()}
-            style={({ pressed }) => [styles.privacyLink, { opacity: pressed ? 0.65 : 1 }]}
-          >
-            <Feather name="shield" size={13} color={colors.mutedForeground} />
-            <Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Privacy options</Text>
-          </Pressable>
+          ageSettings.canOpenAdsPrivacyOptions && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Privacy options"
+              testID="privacy-options"
+              onPress={() => void openPrivacyOptions()}
+              style={({ pressed }) => [styles.privacyLink, { opacity: pressed ? 0.65 : 1 }]}
+            >
+              <Feather name="shield" size={13} color={colors.mutedForeground} />
+              <Text style={[styles.privacyText, { color: colors.mutedForeground }]}>Privacy options</Text>
+            </Pressable>
+          )
         )}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Age and ad settings"
+          testID="age-classification-settings"
+          onPress={ageSettings.openAgeSettings}
+          style={({ pressed }) => [styles.privacyLink, { opacity: pressed ? 0.65 : 1 }]}
+        >
+          <Feather name="shield" size={13} color={colors.mutedForeground} />
+          <Text style={[styles.privacyText, { color: colors.mutedForeground }]}>
+            Age and ads · {ageBandLabel(ageSettings.classification?.ageBand ?? null)}
+          </Text>
+        </Pressable>
       </ScrollView>
       <AdBannerSlot />
     </SafeAreaView>

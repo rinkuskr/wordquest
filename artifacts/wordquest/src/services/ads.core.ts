@@ -3,7 +3,6 @@ export type AdResult = { state: AdState; rewarded: boolean };
 
 export type ConsentDebugGeography = 'DISABLED' | 'EEA' | 'OTHER' | 'REGULATED_US_STATE';
 export type AdsAgeRestrictedTreatment = 'CHILD' | 'TEEN' | 'UNSPECIFIED';
-export const DEFAULT_AGE_RESTRICTED_TREATMENT: AdsAgeRestrictedTreatment = 'UNSPECIFIED';
 
 export interface AdsInitializationOptions {
   /** UMP debug geography is only accepted in development builds. */
@@ -12,15 +11,18 @@ export interface AdsInitializationOptions {
   testDeviceIdentifiers?: string[];
   /**
    * Treatment selected by an approved age-classification strategy.
-   * No age is inferred by the ads provider; omitted values retain UNSPECIFIED.
+   * Android initialization fails closed if no explicit treatment is supplied.
    */
   ageRestrictedTreatment?: AdsAgeRestrictedTreatment;
+  /** UMP under-age-of-consent tag resolved by the app's age policy. */
+  tagForUnderAgeOfConsent?: boolean;
 }
 
 export interface AdsProvider {
   readonly state: AdState;
   subscribe(listener: () => void): () => void;
   initialize(options?: AdsInitializationOptions): Promise<AdState>;
+  disableForSession(): void;
   showPrivacyOptionsForm(): Promise<boolean>;
   recordCompletedPuzzleTransition(): Promise<AdResult>;
   showRewarded(): Promise<AdResult>;
@@ -88,6 +90,8 @@ export class MockAdProvider implements AdsProvider {
   async initialize(): Promise<AdState> {
     return this.state;
   }
+
+  disableForSession(): void {}
 
   async showPrivacyOptionsForm(): Promise<boolean> {
     return false;

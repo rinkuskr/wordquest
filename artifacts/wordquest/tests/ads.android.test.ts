@@ -186,7 +186,10 @@ describe('Android age-restricted ad treatment', () => {
     const provider = new AndroidAdProvider();
 
     await expect(
-      provider.initialize({ ageRestrictedTreatment: selected }),
+      provider.initialize({
+        ageRestrictedTreatment: selected,
+        tagForUnderAgeOfConsent: selected !== 'UNSPECIFIED',
+      }),
     ).resolves.toBe('ready');
 
     expect(native.configurations).toEqual([{ ageRestrictedTreatment: sdkValue }]);
@@ -199,16 +202,15 @@ describe('Android age-restricted ad treatment', () => {
     ]);
   });
 
-  it('keeps the current default behavior as explicit UNSPECIFIED treatment', async () => {
+  it('fails closed when age treatment is omitted instead of defaulting to UNSPECIFIED', async () => {
     const provider = new AndroidAdProvider();
 
-    await expect(provider.initialize()).resolves.toBe('ready');
+    await expect(provider.initialize()).resolves.toBe('disabled');
 
-    expect(native.configurations).toEqual([{ ageRestrictedTreatment: 'unspecified' }]);
-    expect(native.gatherConsent).toHaveBeenCalledWith({});
-    expect(native.events.indexOf('request-configuration')).toBeLessThan(
-      native.events.indexOf('ump-gather'),
-    );
+    expect(native.configurations).toEqual([]);
+    expect(native.gatherConsent).not.toHaveBeenCalled();
+    expect(native.initializeSdk).not.toHaveBeenCalled();
+    expect(native.events).toEqual([]);
   });
 
   it('does not initialize or request ads when UMP does not permit requests', async () => {
@@ -216,7 +218,10 @@ describe('Android age-restricted ad treatment', () => {
     const provider = new AndroidAdProvider();
 
     await expect(
-      provider.initialize({ ageRestrictedTreatment: 'TEEN' }),
+      provider.initialize({
+        ageRestrictedTreatment: 'TEEN',
+        tagForUnderAgeOfConsent: true,
+      }),
     ).resolves.toBe('disabled');
 
     expect(native.configurations).toEqual([{ ageRestrictedTreatment: 'teen' }]);
@@ -224,11 +229,82 @@ describe('Android age-restricted ad treatment', () => {
     expect(provider.state).toBe('disabled');
   });
 
+  it('passes the adult age-of-consent value to UMP before initializing the SDK', async () => {
+    const provider = new AndroidAdProvider();
+
+    await expect(
+      provider.initialize({
+        ageRestrictedTreatment: 'UNSPECIFIED',
+        tagForUnderAgeOfConsent: false,
+      }),
+    ).resolves.toBe('ready');
+
+    expect(native.gatherConsent).toHaveBeenCalledWith({
+      tagForUnderAgeOfConsent: false,
+    });
+    expect(native.events.indexOf('ump-gather')).toBeLessThan(
+      native.events.indexOf('sdk-initialize'),
+    );
+  });
+
+  it('preserves the selected UMP age-of-consent value on a consent retry', async () => {
+    native.setConsentAllowed(false);
+    const provider = new AndroidAdProvider();
+    await provider.initialize({
+      ageRestrictedTreatment: 'TEEN',
+      tagForUnderAgeOfConsent: true,
+    });
+
+    native.setConsentAllowed(true);
+    await provider.showPrivacyOptionsForm();
+
+    expect(native.gatherConsent).toHaveBeenCalledWith({
+      tagForUnderAgeOfConsent: true,
+    });
+    expect(native.configurations).toEqual([
+      { ageRestrictedTreatment: 'teen' },
+      { ageRestrictedTreatment: 'teen' },
+    ]);
+  });
+
+  it('blocks new requests and clears a loaded interstitial when age settings change', async () => {
+    const provider = new AndroidAdProvider();
+    await provider.initialize({
+      ageRestrictedTreatment: 'UNSPECIFIED',
+      tagForUnderAgeOfConsent: false,
+    });
+    const loadedInterstitial = native.interstitial;
+    loadedInterstitial.emit('loaded');
+
+    provider.disableForSession();
+
+    expect(provider.state).toBe('disabled');
+    loadedInterstitial.emit('loaded');
+    await expect(provider.showRewarded()).resolves.toEqual({
+      state: 'disabled',
+      rewarded: false,
+    });
+    await expect(provider.recordCompletedPuzzleTransition()).resolves.toEqual({
+      state: 'disabled',
+      rewarded: false,
+    });
+    expect(native.rewarded).toBeNull();
+
+    await expect(
+      provider.initialize({ ageRestrictedTreatment: 'TEEN' }),
+    ).resolves.toBe('disabled');
+    expect(native.gatherConsent).toHaveBeenCalledTimes(1);
+    expect(native.events).not.toContain('rewarded-create');
+  });
+
   it('retains the selected treatment when consent is granted later through privacy options', async () => {
     native.setConsentAllowed(false);
     const provider = new AndroidAdProvider();
     await expect(
-      provider.initialize({ ageRestrictedTreatment: 'CHILD' }),
+      provider.initialize({
+        ageRestrictedTreatment: 'CHILD',
+        tagForUnderAgeOfConsent: true,
+      }),
     ).resolves.toBe('disabled');
 
     native.setConsentAllowed(true);
@@ -248,7 +324,10 @@ describe('Android age-restricted ad treatment', () => {
     const provider = new AndroidAdProvider();
 
     await expect(
-      provider.initialize({ ageRestrictedTreatment: 'TEEN' }),
+      provider.initialize({
+        ageRestrictedTreatment: 'TEEN',
+        tagForUnderAgeOfConsent: true,
+      }),
     ).resolves.toBe('failed');
 
     expect(native.gatherConsent).not.toHaveBeenCalled();
@@ -275,7 +354,10 @@ describe('Android age-restricted ad treatment', () => {
 
   it('applies the one global treatment before banner, rewarded, and interstitial requests', async () => {
     const provider = new AndroidAdProvider();
-    await provider.initialize({ ageRestrictedTreatment: 'TEEN' });
+    await provider.initialize({
+      ageRestrictedTreatment: 'UNSPECIFIED',
+      tagForUnderAgeOfConsent: false,
+    });
 
     native.bannerState = provider.state;
     const bannerMarkup = renderToStaticMarkup(createElement(AdBannerSlot));
@@ -293,7 +375,10 @@ describe('Android age-restricted ad treatment', () => {
     native.rewarded.emit('closed');
     await expect(rewardPromise).resolves.toEqual({ state: 'ready', rewarded: true });
 
-    expect(native.configurations).toEqual([{ ageRestrictedTreatment: 'teen' }]);
+    expect(native.configurations).toEqual([{ ageRestrictedTreatment: 'unspecified' }]);
+    expect(native.gatherConsent).toHaveBeenCalledWith({
+      tagForUnderAgeOfConsent: false,
+    });
     expect(native.events.indexOf('request-configuration')).toBeLessThan(
       native.events.indexOf('interstitial-create'),
     );

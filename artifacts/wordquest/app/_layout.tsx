@@ -7,7 +7,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useColors } from '@/hooks/useColors';
 import { GameProvider } from '@/src/game/GameProvider';
 import { useGame } from '@/src/game/GameProvider';
-import { adProvider } from '@/src/services/ads';
+import { AgeClassificationProvider, useAgeClassification } from '@/src/age/AgeClassificationProvider';
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -34,6 +34,11 @@ function RootLayoutNav() {
     startFreshProgress,
     retrySaveProgress,
   } = useGame();
+  const {
+    notice: ageNotice,
+    storageError: ageStorageError,
+    restartRequired: ageRestartRequired,
+  } = useAgeClassification();
 
   const showProgressRecovery =
     progressLoadStatus === 'read-error' || progressLoadStatus === 'recovery-required';
@@ -93,6 +98,26 @@ function RootLayoutNav() {
           )}
         </View>
       )}
+      {!!ageNotice && (
+        <View
+          accessibilityRole="alert"
+          style={[styles.ageNotice, { backgroundColor: colors.card, borderColor: colors.border }]}
+        >
+          <Text style={[styles.noticeTitle, { color: colors.foreground }]}>
+            {ageRestartRequired ? 'Ads paused' : 'Age and ad settings'}
+          </Text>
+          <Text style={[styles.noticeMessage, { color: colors.mutedForeground }]}>{ageNotice}</Text>
+        </View>
+      )}
+      {!!ageStorageError && !ageNotice && (
+        <View
+          accessibilityRole="alert"
+          style={[styles.ageNotice, { backgroundColor: colors.card, borderColor: colors.border }]}
+        >
+          <Text style={[styles.noticeTitle, { color: colors.foreground }]}>Age choice unavailable</Text>
+          <Text style={[styles.noticeMessage, { color: colors.mutedForeground }]}>{ageStorageError}</Text>
+        </View>
+      )}
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="categories" />
@@ -121,10 +146,6 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    void adProvider.initialize();
-  }, []);
-
-  useEffect(() => {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
     }
@@ -138,7 +159,9 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView style={{ flex: 1 }}>
             <GameProvider>
-              <RootLayoutNav />
+              <AgeClassificationProvider>
+                <RootLayoutNav />
+              </AgeClassificationProvider>
             </GameProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>
@@ -154,6 +177,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     gap: 5,
+  },
+  ageNotice: {
+    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    gap: 4,
   },
   noticeTitle: { fontSize: 13, fontWeight: '800' },
   noticeMessage: { fontSize: 12, lineHeight: 17 },

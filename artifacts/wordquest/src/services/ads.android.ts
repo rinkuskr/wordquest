@@ -10,7 +10,6 @@ import mobileAds, {
   RewardedAdEventType,
 } from 'react-native-google-mobile-ads';
 import {
-  DEFAULT_AGE_RESTRICTED_TREATMENT,
   INITIAL_INTERSTITIAL_SCHEDULE,
   INTERSTITIAL_STORAGE_KEY,
   markInterstitialShown,
@@ -56,7 +55,9 @@ export class AndroidAdProvider implements AdsProvider {
   private interstitialRetry?: ReturnType<typeof setTimeout>;
   private lastInterstitialShownAt = 0;
   private rewardedRequestActive = false;
-  private ageRestrictedTreatment: AdsAgeRestrictedTreatment = DEFAULT_AGE_RESTRICTED_TREATMENT;
+  private ageRestrictedTreatment?: AdsAgeRestrictedTreatment;
+  private tagForUnderAgeOfConsent?: boolean;
+  private disabledForSession = false;
 
   get state(): AdState {
     return this.currentState;
@@ -74,10 +75,18 @@ export class AndroidAdProvider implements AdsProvider {
   }
 
   async initialize(options?: AdsInitializationOptions): Promise<AdState> {
+    if (this.disabledForSession) return this.currentState;
     if (this.initialized) return this.currentState;
     if (this.initialization) return this.initialization;
     if (options?.ageRestrictedTreatment) {
       this.ageRestrictedTreatment = options.ageRestrictedTreatment;
+    }
+    if (options?.tagForUnderAgeOfConsent !== undefined) {
+      this.tagForUnderAgeOfConsent = options.tagForUnderAgeOfConsent;
+    }
+    if (!this.ageRestrictedTreatment || this.tagForUnderAgeOfConsent === undefined) {
+      this.setState('disabled');
+      return this.currentState;
     }
 
     this.setState('loading');
@@ -89,6 +98,13 @@ export class AndroidAdProvider implements AdsProvider {
 
   private async initializeAfterConsent(options?: AdsInitializationOptions): Promise<AdState> {
     try {
+      const ageRestrictedTreatment = this.ageRestrictedTreatment;
+      const tagForUnderAgeOfConsent = this.tagForUnderAgeOfConsent;
+      if (!ageRestrictedTreatment || tagForUnderAgeOfConsent === undefined) {
+        this.setState('disabled');
+        return this.currentState;
+      }
+
       if (
         options &&
         !__DEV__ &&
@@ -98,21 +114,24 @@ export class AndroidAdProvider implements AdsProvider {
         return this.currentState;
       }
 
-      const consentOptions = __DEV__ && options
-        ? {
-            ...(options.debugGeography
-              ? { debugGeography: AdsConsentDebugGeography[options.debugGeography] }
-              : {}),
-            ...(options.testDeviceIdentifiers?.length
-              ? { testDeviceIdentifiers: options.testDeviceIdentifiers }
-              : {}),
-          }
-        : {};
+      const consentOptions = {
+        ...(__DEV__ && options?.debugGeography
+          ? { debugGeography: AdsConsentDebugGeography[options.debugGeography] }
+          : {}),
+        tagForUnderAgeOfConsent,
+        ...(__DEV__ && options?.testDeviceIdentifiers?.length
+          ? { testDeviceIdentifiers: options.testDeviceIdentifiers }
+          : {}),
+      };
 
       const adsSdk = mobileAds();
       await adsSdk.setRequestConfiguration({
-        ageRestrictedTreatment: GOOGLE_AGE_TREATMENTS[this.ageRestrictedTreatment],
+        ageRestrictedTreatment: GOOGLE_AGE_TREATMENTS[ageRestrictedTreatment],
       });
+      if (this.disabledForSession) {
+        this.setState('disabled');
+        return this.currentState;
+      }
 
       let canRequestAds: boolean;
       try {
@@ -124,12 +143,20 @@ export class AndroidAdProvider implements AdsProvider {
       }
 
       this.consentAllowsAds = canRequestAds;
+      if (this.disabledForSession) {
+        this.setState('disabled');
+        return this.currentState;
+      }
       if (!canRequestAds) {
         this.setState('disabled');
         return this.currentState;
       }
 
       await adsSdk.initialize();
+      if (this.disabledForSession) {
+        this.setState('disabled');
+        return this.currentState;
+      }
       this.initialized = true;
       this.setState('ready');
       this.preloadInterstitial();
@@ -141,7 +168,19 @@ export class AndroidAdProvider implements AdsProvider {
     }
   }
 
+  disableForSession(): void {
+    this.disabledForSession = true;
+    this.consentAllowsAds = false;
+    this.setState('disabled');
+    if (this.interstitialRetry) {
+      clearTimeout(this.interstitialRetry);
+      this.interstitialRetry = undefined;
+    }
+    this.clearInterstitial(this.interstitialAd);
+  }
+
   async showPrivacyOptionsForm(): Promise<boolean> {
+    if (this.disabledForSession) return false;
     try {
       const currentConsent = await AdsConsent.getConsentInfo();
       if (
@@ -371,7 +410,7 @@ export class AndroidAdProvider implements AdsProvider {
 
   private scheduleInterstitialRetry() {
     if (this.interstitialRetry) clearTimeout(this.interstitialRetry);
-    if (!this.initialized || !this.consentAllowsAds) return;
+    if (this.disabledForSession || !this.initialized || !this.consentAllowsAds) return;
     this.interstitialRetry = setTimeout(() => {
       this.interstitialRetry = undefined;
       this.preloadInterstitial();
