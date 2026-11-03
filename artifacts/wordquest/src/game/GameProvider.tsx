@@ -36,6 +36,7 @@ import {
 import {
   archiveAndClearDailyRun,
   clearDailyRun,
+  clearDailyRunForDate,
   discardRecoveredDailyRun,
   DAILY_RUN_APP_VERSION,
   loadDailyRun,
@@ -49,6 +50,11 @@ import {
   startFreshProgress as startFreshStoredProgress,
   type ProgressLoadResult,
 } from '@/src/services/persistence';
+import {
+  DailyRunCleanupCoordinator,
+  cleanupCompletedDailyRun,
+  retryDailyRunCleanup,
+} from '@/src/game/dailyRunCleanup';
 import type {
   CategoryId,
   DailyActiveRunSnapshot,
@@ -184,8 +190,13 @@ export function GameProvider({ children }: React.PropsWithChildren) {
   const completionHandled = useRef(false);
   const dailyRunArchivePending = useRef(false);
   const dailyRunRestoreAttempted = useRef<string | null>(null);
+  const dailyRunCleanup = useRef<DailyRunCleanupCoordinator | null>(null);
   const hintTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCountdownSecond = useRef<number | null>(null);
+
+  if (!dailyRunCleanup.current) {
+    dailyRunCleanup.current = new DailyRunCleanupCoordinator(clearDailyRunForDate);
+  }
 
   const retryLoadProgress = useCallback(async () => {
     setReady(false);
@@ -280,18 +291,24 @@ export function GameProvider({ children }: React.PropsWithChildren) {
     if (current?.dailyChallengeDate && !current.ended) {
       return persistDailyRunSnapshot(current);
     }
-    if (!current?.dailyChallengeDate || pendingDailyRecord) return false;
-    try {
-      await clearDailyRun();
+    const cleanup = dailyRunCleanup.current;
+    if (!cleanup) return false;
+    const cleared = await retryDailyRunCleanup(
+      current,
+      pendingDailyRecord !== null,
+      cleanup,
+    );
+    if (cleared) {
       setLoadedDailyRun(null);
       setDailyRunSaveError(null);
       setDailyRunSaveStatus('saved');
       return true;
-    } catch {
+    }
+    if (cleanup.hasPending) {
       setDailyRunSaveStatus('error');
       setDailyRunSaveError('The saved Daily Challenge attempt still could not be cleared. Retry when device storage is available.');
-      return false;
     }
+    return false;
   }, [pendingDailyRecord, persistDailyRunSnapshot]);
 
   const discardCorruptDailyRun = useCallback(async () => {
@@ -673,11 +690,25 @@ export function GameProvider({ children }: React.PropsWithChildren) {
       return;
     }
 
-    const hasTodayCompletion = hasDailyCompletionForDate(dailyHistory.records, today);
-    if (hasTodayCompletion) {
+    const hasRunCompletion = hasDailyCompletionForDate(
+      dailyHistory.records,
+      loadedDailyRun.dateKey,
+    );
+    if (hasRunCompletion) {
       setLoadedDailyRun(null);
       setDailyRunLoadStatus('ready');
-      void clearDailyRun().catch(() => {
+      const cleanup = dailyRunCleanup.current;
+      if (!cleanup) return;
+      void cleanupCompletedDailyRun(
+        loadedDailyRun.dateKey,
+        hasRunCompletion,
+        cleanup,
+      ).then((cleared) => {
+        if (cleared) {
+          setDailyRunSaveStatus('saved');
+          setDailyRunSaveError(null);
+          return;
+        }
         setDailyRunSaveStatus('error');
         setDailyRunSaveError("Today's result is already saved, but the old attempt couldn't be cleared. It won't be restored over the completed result.");
       });

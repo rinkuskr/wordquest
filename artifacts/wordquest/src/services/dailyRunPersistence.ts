@@ -211,6 +211,44 @@ export async function clearDailyRun(): Promise<void> {
   });
 }
 
+export async function clearDailyRunForDate(dateKey: string): Promise<void> {
+  await enqueue(async () => {
+    if (access !== 'loaded') {
+      throw new Error('Daily Challenge attempt storage has not been safely loaded. Retry before clearing.');
+    }
+    if (!isUtcDateKey(dateKey)) {
+      throw new Error('Daily Challenge cleanup date is invalid.');
+    }
+
+    const raw = await AsyncStorage.getItem(DAILY_RUN_KEY);
+    if (raw === null || raw === 'null') {
+      lastSavedSerialized = 'null';
+      lastRawSnapshot = 'null';
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('The saved Daily Challenge attempt is not valid JSON and was preserved.');
+    }
+    if (!isDailyActiveRunSnapshot(parsed)) {
+      throw new Error('The saved Daily Challenge attempt is invalid and was preserved.');
+    }
+    if (parsed.dateKey !== dateKey) {
+      // A newer attempt replaced the stale snapshot while cleanup was pending.
+      lastSavedSerialized = raw;
+      lastRawSnapshot = raw;
+      return;
+    }
+
+    await AsyncStorage.setItem(DAILY_RUN_KEY, 'null');
+    lastSavedSerialized = 'null';
+    lastRawSnapshot = 'null';
+  });
+}
+
 export async function archiveAndClearDailyRun(): Promise<boolean> {
   return enqueue(async () => {
     if (access !== 'loaded') return false;

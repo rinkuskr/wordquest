@@ -50,6 +50,7 @@ const RUN_KEY = 'wordquest:daily-run:v1';
 const RUN_BACKUP_KEY = `${RUN_KEY}:recovery-backup`;
 let persistence: typeof import('../src/services/dailyChallengePersistence');
 let runPersistence: typeof import('../src/services/dailyRunPersistence');
+let runCleanup: typeof import('../src/game/dailyRunCleanup');
 
 beforeEach(async () => {
   storage.values.clear();
@@ -61,6 +62,7 @@ beforeEach(async () => {
   vi.resetModules();
   persistence = await import('../src/services/dailyChallengePersistence');
   runPersistence = await import('../src/services/dailyRunPersistence');
+  runCleanup = await import('../src/game/dailyRunCleanup');
 });
 
 describe('deterministic daily challenge generation', () => {
@@ -443,6 +445,126 @@ describe('safe daily active-run storage', () => {
     await expect(runPersistence.saveDailyRun({ ...saved, elapsedMs: saved.elapsedMs + 1_000 }))
       .rejects.toThrow('simulated write failure');
     expect(storage.values.get(RUN_KEY)).toBe(original);
+  });
+
+  it('retries completed-history cleanup after a provider restart without an in-memory game', async () => {
+    const saved = makeDailyRunSnapshot();
+    const record: DailyChallengeRecord = {
+      dateKey: saved.dateKey,
+      categoryId: saved.categoryId,
+      bestScore: 120,
+      completionTimeSeconds: 70,
+      wordsFound: 8,
+      totalWords: 8,
+    };
+    await persistence.loadDailyHistory();
+    await persistence.recordDailyCompletion(record);
+    const originalHistory = storage.values.get(HISTORY_KEY);
+    await runPersistence.loadDailyRun();
+    await runPersistence.saveDailyRun(saved);
+    const originalRun = JSON.stringify(saved);
+
+    const firstProviderCleanup = new runCleanup.DailyRunCleanupCoordinator(
+      runPersistence.clearDailyRunForDate,
+    );
+    storage.rejectWrites = true;
+    await expect(runCleanup.cleanupCompletedDailyRun(
+      saved.dateKey,
+      hasDailyCompletionForDate([record], saved.dateKey),
+      firstProviderCleanup,
+    )).resolves.toBe(false);
+    expect(storage.values.get(RUN_KEY)).toBe(originalRun);
+    expect(storage.values.get(HISTORY_KEY)).toBe(originalHistory);
+
+    storage.rejectWrites = false;
+    vi.resetModules();
+    persistence = await import('../src/services/dailyChallengePersistence');
+    runPersistence = await import('../src/services/dailyRunPersistence');
+    runCleanup = await import('../src/game/dailyRunCleanup');
+    const historyAfterRestart = await persistence.loadDailyHistory();
+    const runAfterRestart = await runPersistence.loadDailyRun();
+    expect(historyAfterRestart).toMatchObject({
+      status: 'loaded',
+      history: { records: [record] },
+    });
+    expect(runAfterRestart).toEqual({ status: 'loaded', snapshot: saved });
+
+    // This new coordinator models the provider's empty in-memory state after restart.
+    const restartedProviderCleanup = new runCleanup.DailyRunCleanupCoordinator(
+      runPersistence.clearDailyRunForDate,
+    );
+    const completedRecords = historyAfterRestart.status === 'loaded'
+      ? historyAfterRestart.history.records
+      : [];
+    storage.rejectWrites = true;
+    await expect(runCleanup.cleanupCompletedDailyRun(
+      saved.dateKey,
+      hasDailyCompletionForDate(completedRecords, saved.dateKey),
+      restartedProviderCleanup,
+    )).resolves.toBe(false);
+    // The provider's retry action must work after restart with no game in memory.
+    storage.rejectWrites = false;
+    await expect(runCleanup.retryDailyRunCleanup(
+      null,
+      false,
+      restartedProviderCleanup,
+    )).resolves.toBe(true);
+    expect(storage.values.get(RUN_KEY)).toBe('null');
+    expect(storage.values.get(HISTORY_KEY)).toBe(originalHistory);
+
+    const writesAfterCleanup = storage.setItem.mock.calls.length;
+    await expect(runCleanup.retryDailyRunCleanup(
+      null,
+      false,
+      restartedProviderCleanup,
+    )).resolves.toBe(true);
+    expect(storage.setItem).toHaveBeenCalledTimes(writesAfterCleanup);
+    expect(JSON.parse(storage.values.get(HISTORY_KEY) ?? '{}').records).toEqual([record]);
+  });
+
+  it('preserves the stale run and completed history while cleanup storage is unavailable', async () => {
+    const saved = makeDailyRunSnapshot();
+    const record: DailyChallengeRecord = {
+      dateKey: saved.dateKey,
+      categoryId: saved.categoryId,
+      bestScore: 110,
+      completionTimeSeconds: 65,
+      wordsFound: 8,
+      totalWords: 8,
+    };
+    await persistence.loadDailyHistory();
+    await persistence.recordDailyCompletion(record);
+    const originalHistory = storage.values.get(HISTORY_KEY);
+    await runPersistence.loadDailyRun();
+    await runPersistence.saveDailyRun(saved);
+    const originalRun = JSON.stringify(saved);
+
+    const cleanup = new runCleanup.DailyRunCleanupCoordinator(
+      runPersistence.clearDailyRunForDate,
+    );
+    cleanup.markPending(saved.dateKey);
+    storage.rejectWrites = true;
+
+    await expect(runCleanup.retryDailyRunCleanup(null, false, cleanup)).resolves.toBe(false);
+    expect(storage.values.get(RUN_KEY)).toBe(originalRun);
+    expect(storage.values.get(HISTORY_KEY)).toBe(originalHistory);
+    expect(cleanup.hasPending).toBe(true);
+  });
+
+  it('does not clear a newer active run when retrying cleanup for an older date', async () => {
+    const stale = makeDailyRunSnapshot('2026-11-03');
+    const newer = makeDailyRunSnapshot('2026-11-04');
+    await runPersistence.loadDailyRun();
+    await runPersistence.saveDailyRun(stale);
+
+    const cleanup = new runCleanup.DailyRunCleanupCoordinator(
+      runPersistence.clearDailyRunForDate,
+    );
+    cleanup.markPending(stale.dateKey);
+    await runPersistence.saveDailyRun(newer);
+
+    await expect(cleanup.retry()).resolves.toBe(true);
+    expect(storage.values.get(RUN_KEY)).toBe(JSON.stringify(newer));
   });
 
   it('backs up malformed JSON before explicit discard', async () => {
