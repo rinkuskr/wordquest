@@ -109,8 +109,12 @@ export function generatePuzzle(
             : AXIS_DIRECTIONS;
         for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS && !placed; attempt += 1) {
           const direction = directions[Math.floor(random() * directions.length)];
-          const row = Math.floor(random() * size);
-          const col = Math.floor(random() * size);
+          const rowMin = direction.row < 0 ? word.length - 1 : 0;
+          const rowMax = direction.row > 0 ? size - word.length : size - 1;
+          const colMin = direction.col < 0 ? word.length - 1 : 0;
+          const colMax = direction.col > 0 ? size - word.length : size - 1;
+          const row = rowMin + Math.floor(random() * (rowMax - rowMin + 1));
+          const col = colMin + Math.floor(random() * (colMax - colMin + 1));
           const cells = Array.from({ length: word.length }, (_, index) => ({
             row: row + direction.row * index,
             col: col + direction.col * index,

@@ -103,7 +103,7 @@ export default function GameScreen() {
       {game.puzzle.placementDiagnostics &&
         !game.puzzle.placementDiagnostics.distributionSatisfied && (
           <Text style={[styles.layoutNotice, { color: colors.orange }]}>
-            Layout adjusted to keep all words playable ({game.puzzle.placementDiagnostics.actualDiagonalCount} of {game.puzzle.placementDiagnostics.requestedDiagonalCount} diagonal targets).
+            Target diagonal count was not reached within the retry limit ({game.puzzle.placementDiagnostics.actualDiagonalCount}/{game.puzzle.placementDiagnostics.requestedDiagonalCount}); all words remain playable.
           </Text>
         )}
 

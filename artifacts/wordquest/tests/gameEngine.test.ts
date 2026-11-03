@@ -21,6 +21,7 @@ import {
   scoreSelection,
   seededRandom,
   selectionWord,
+  validatePuzzle,
   validateBonusWord,
 } from '../src/engine/gameEngine';
 import { awardFirstCompletion, INITIAL_PROGRESS, normalizeProgress } from '../src/engine/progression';
@@ -468,6 +469,68 @@ describe('hints, progression, and local data recovery', () => {
     expect(plans['ocean-life']).toMatchObject({ gridSize: 10, targetWords: CATEGORIES.find((category) => category.id === 'ocean-life')!.words, timeLimitSeconds: 210, diagonalWordCount: 4 });
     expect(plans.countries).toMatchObject({ gridSize: 12, targetWords: CATEGORIES.find((category) => category.id === 'countries')!.words, timeLimitSeconds: 240, diagonalWordCount: 5 });
     expect(plans.jobs).toMatchObject({ gridSize: 12, targetWords: CATEGORIES.find((category) => category.id === 'jobs')!.words, timeLimitSeconds: 210, diagonalWordCount: 4 });
+  });
+
+  it('places four diagonals for every previously adjusted deterministic seed', () => {
+    const cases: ReadonlyArray<readonly [string, number]> = [
+      ['vegetables', 15],
+      ['vegetables', 22],
+      ['vegetables', 23],
+      ['vegetables', 27],
+      ['vegetables', 52],
+      ['vegetables', 63],
+      ['vegetables', 74],
+      ['vegetables', 83],
+      ['vegetables', 99],
+      ['vegetables', 100],
+      ['nature', 13],
+      ['nature', 16],
+      ['nature', 45],
+      ['nature', 47],
+      ['nature', 88],
+      ['nature', 93],
+      ['nature', 97],
+    ];
+
+    for (const [categoryId, seed] of cases) {
+      const category = CATEGORIES.find((item) => item.id === categoryId)!;
+      const plan = getCategoryPuzzlePlan(category);
+      const puzzle = generatePuzzle(plan.targetWords, seededRandom(seed), {
+        gridSize: plan.gridSize,
+        diagonalWordCount: plan.diagonalWordCount,
+      });
+
+      expect(puzzle.words, `${categoryId} seed=${seed} target words`).toEqual(plan.targetWords);
+      expect(puzzle.placements, `${categoryId} seed=${seed} placements`).toHaveLength(plan.targetWords.length);
+      expect(puzzle.placementDiagnostics).toEqual({
+        requestedDiagonalCount: 4,
+        actualDiagonalCount: 4,
+        distributionSatisfied: true,
+      });
+      validatePuzzle(puzzle);
+
+      const occupiedCells = new Map<string, string>();
+      for (const placement of puzzle.placements) {
+        for (const [index, cell] of placement.cells.entries()) {
+          expect(cell.row, `${categoryId} seed=${seed} row bound`).toBeGreaterThanOrEqual(0);
+          expect(cell.col, `${categoryId} seed=${seed} column bound`).toBeGreaterThanOrEqual(0);
+          expect(cell.row, `${categoryId} seed=${seed} row bound`).toBeLessThan(puzzle.size);
+          expect(cell.col, `${categoryId} seed=${seed} column bound`).toBeLessThan(puzzle.size);
+          const key = `${cell.row},${cell.col}`;
+          const letter = placement.word[index];
+          const previousLetter = occupiedCells.get(key);
+          if (previousLetter !== undefined) {
+            expect(letter, `${categoryId} seed=${seed} matching overlap`).toBe(previousLetter);
+          }
+          occupiedCells.set(key, letter);
+        }
+
+        const forward = selectionWord(puzzle.grid, placement.cells);
+        const reverse = selectionWord(puzzle.grid, [...placement.cells].reverse());
+        expect(matchPuzzleWord(forward ?? '', plan.targetWords)).toBe(placement.word);
+        expect(matchPuzzleWord(reverse ?? '', plan.targetWords)).toBe(placement.word);
+      }
+    }
   });
 
   it('generates each category plan reliably for 100 deterministic seeds', () => {
