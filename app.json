@@ -6,7 +6,7 @@
       }
     },
     "android": {
-      "package": "com.rinksd.workspace"
+      "package": "com.webrinko.wordquest"
     }
   }
 }
