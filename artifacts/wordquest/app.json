@@ -11,16 +11,14 @@
       "supportsTablet": false
     },
     "android": {
-      "package": "com.wordquest.puzzle",
+      "package": "com.webrinko.wordquest",
       "versionCode": 1,
       "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#17285b"
       },
-      "permissions": [
-        "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      "permissions": ["android.permission.MODIFY_AUDIO_SETTINGS"]
     },
     "web": {
       "favicon": "./assets/images/icon.png"
