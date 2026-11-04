@@ -88,6 +88,15 @@ export class AndroidAdProvider implements AdsProvider {
       this.setState('disabled');
       return this.currentState;
     }
+    if (
+      !nativeAdsConfig.androidAppId ||
+      !nativeAdsConfig.bannerUnitId ||
+      !nativeAdsConfig.interstitialUnitId ||
+      !nativeAdsConfig.rewardedUnitId
+    ) {
+      this.setState('disabled');
+      return this.currentState;
+    }
 
     this.setState('loading');
     this.initialization = this.initializeAfterConsent(options).finally(() => {

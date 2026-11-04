@@ -1,0 +1,9 @@
+import { TEST_ADMOB_CONFIG } from '../config/admobConfig';
+
+process.env.EXPO_PUBLIC_ADMOB_PROFILE = 'test';
+process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID = TEST_ADMOB_CONFIG.androidAppId;
+process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID = TEST_ADMOB_CONFIG.iosAppId;
+process.env.EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID = TEST_ADMOB_CONFIG.bannerUnitId;
+process.env.EXPO_PUBLIC_ADMOB_INTERSTITIAL_UNIT_ID =
+  TEST_ADMOB_CONFIG.interstitialUnitId;
+process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID = TEST_ADMOB_CONFIG.rewardedUnitId;

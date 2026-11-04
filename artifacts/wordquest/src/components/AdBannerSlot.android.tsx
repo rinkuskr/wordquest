@@ -8,7 +8,7 @@ import { useAdsState } from '@/src/services/useAdsState';
 export default function AdBannerSlot() {
   const colors = useColors();
   const adsState = useAdsState();
-  if (adsState !== 'ready') return null;
+  if (adsState !== 'ready' || !nativeAdsConfig.bannerUnitId) return null;
 
   return (
     <View

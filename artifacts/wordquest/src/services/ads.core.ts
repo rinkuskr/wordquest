@@ -1,3 +1,5 @@
+import { resolveRuntimeAdMobConfig } from '../../config/admobRuntimeConfig';
+
 export type AdState = 'disabled' | 'ready' | 'loading' | 'failed';
 export type AdResult = { state: AdState; rewarded: boolean };
 
@@ -67,14 +69,19 @@ export function markInterstitialShown(
   return { completedSinceLastShown: 0, lastShownAt: now };
 }
 
-/** Google sample IDs only. Replace only after a separate production review. */
-export const nativeAdsConfig = {
-  androidAppId: 'ca-app-pub-3940256099942544~3347511713',
-  iosAppId: 'ca-app-pub-3940256099942544~1458002511',
-  bannerUnitId: 'ca-app-pub-3940256099942544/6300978111',
-  interstitialUnitId: 'ca-app-pub-3940256099942544/1033173712',
-  rewardedUnitId: 'ca-app-pub-3940256099942544/5224354917',
-} as const;
+/**
+ * Production values are inlined from the selected EAS environment. Missing or
+ * invalid production values fail closed instead of selecting test IDs.
+ */
+export const nativeAdsConfig = resolveRuntimeAdMobConfig({
+  EXPO_PUBLIC_ADMOB_PROFILE: process.env.EXPO_PUBLIC_ADMOB_PROFILE,
+  EXPO_PUBLIC_ADMOB_ANDROID_APP_ID: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID,
+  EXPO_PUBLIC_ADMOB_IOS_APP_ID: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID,
+  EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID: process.env.EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID,
+  EXPO_PUBLIC_ADMOB_INTERSTITIAL_UNIT_ID:
+    process.env.EXPO_PUBLIC_ADMOB_INTERSTITIAL_UNIT_ID,
+  EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID: process.env.EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID,
+});
 
 /**
  * Safe no-op provider for web, unsupported platforms, and tests.
