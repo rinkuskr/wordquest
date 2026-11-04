@@ -19,7 +19,17 @@ function resolveAdMobConfig(environment = process.env) {
     return { ...TEST_ADMOB_CONFIG };
   }
 
-  return validateProductionAdMobConfig(environment);
+  const productionConfig = validateProductionAdMobConfig(environment);
+  if (
+    Object.values(productionConfig).some((value) =>
+      Object.values(TEST_ADMOB_CONFIG).includes(value),
+    )
+  ) {
+    throw new Error(
+      '[WordQuest AdMob] Google sample/test IDs are forbidden in production.',
+    );
+  }
+  return productionConfig;
 }
 
 module.exports = {

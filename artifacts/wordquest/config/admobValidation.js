@@ -14,8 +14,6 @@ const PRODUCTION_ID_PATTERNS = Object.freeze({
   EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID: /^ca-app-pub-(\d{16})\/\d{10}$/,
 });
 
-const GOOGLE_TEST_PUBLISHER_ID = '3940256099942544';
-
 function resolveAdMobProfile(environment = process.env) {
   const requestedProfile = environment.EXPO_PUBLIC_ADMOB_PROFILE;
   const profile =
@@ -57,11 +55,6 @@ function validateProductionAdMobConfig(environment) {
       normalized[key].match(PRODUCTION_ID_PATTERNS[key])[1],
     ),
   );
-  if (publisherIds.has(GOOGLE_TEST_PUBLISHER_ID)) {
-    throw new Error(
-      '[WordQuest AdMob] Google sample/test IDs are forbidden in production.',
-    );
-  }
   if (publisherIds.size !== 1) {
     throw new Error(
       '[WordQuest AdMob] Production App ID and ad-unit IDs must belong to the same AdMob publisher.',

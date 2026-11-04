@@ -56,6 +56,7 @@ describe('AdMob build configuration', () => {
     );
     expect(runtimeSource).not.toContain('ca-app-pub-3940256099942544');
     expect(validationSource).not.toContain('ca-app-pub-3940256099942544');
+    expect(validationSource).not.toContain('3940256099942544');
 
     expect(
       resolveRuntimeAdMobConfig({ EXPO_PUBLIC_ADMOB_PROFILE: 'test' }),
@@ -69,6 +70,7 @@ describe('AdMob build configuration', () => {
       resolveRuntimeAdMobConfig({
         EXPO_PUBLIC_ADMOB_PROFILE: 'test',
         EXPO_PUBLIC_ADMOB_ANDROID_APP_ID: TEST_ADMOB_CONFIG.androidAppId,
+        EXPO_PUBLIC_ADMOB_IOS_APP_ID: TEST_ADMOB_CONFIG.iosAppId,
         EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID: TEST_ADMOB_CONFIG.bannerUnitId,
         EXPO_PUBLIC_ADMOB_INTERSTITIAL_UNIT_ID: TEST_ADMOB_CONFIG.interstitialUnitId,
         EXPO_PUBLIC_ADMOB_REWARDED_UNIT_ID: TEST_ADMOB_CONFIG.rewardedUnitId,
